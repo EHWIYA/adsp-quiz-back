@@ -10,15 +10,15 @@ class Settings(BaseSettings):
     )
 
     # Database
-    database_url: str
-    db_user: str
-    db_password: str
+    database_url: str = ""
+    db_user: str = ""
+    db_password: str = ""
 
     # OpenAI
-    openai_api_key: str
+    openai_api_key: str = ""
 
     # Security
-    secret_key: str
+    secret_key: str = ""
     algorithm: str = "HS256"
 
     # CORS
