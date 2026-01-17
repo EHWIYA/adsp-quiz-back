@@ -93,22 +93,43 @@ echo -e "${GREEN}✅ 필수 환경변수 확인 완료${NC}"
 echo -e "\n${YELLOW}[3/5] 데이터베이스 마이그레이션 실행${NC}"
 # 프로젝트 디렉토리는 이미 시작 부분에서 이동했으므로 여기서는 이동 불필요
 
-if docker-compose --env-file "$ENV_FILE" ps | grep -q "adsp-quiz-postgres.*Up"; then
-    echo -e "${GREEN}✅ PostgreSQL 컨테이너 실행 중${NC}"
-    
-    # 마이그레이션 실행
-    if docker-compose --env-file "$ENV_FILE" exec -T app alembic upgrade head; then
-        echo -e "${GREEN}✅ 마이그레이션 완료${NC}"
-    else
-        echo -e "${RED}❌ 마이그레이션 실패${NC}"
-        exit 1
-    fi
-else
+# PostgreSQL 컨테이너 상태 확인 및 시작
+if ! docker-compose --env-file "$ENV_FILE" ps | grep -q "adsp-quiz-postgres.*Up"; then
     echo -e "${YELLOW}⚠️  PostgreSQL 컨테이너가 실행되지 않았습니다. 먼저 시작합니다...${NC}"
     docker-compose --env-file "$ENV_FILE" up -d postgres
+    
+    # PostgreSQL이 준비될 때까지 대기 (최대 30초)
+    echo "PostgreSQL 컨테이너 준비 대기 중..."
+    for i in {1..30}; do
+        if docker-compose --env-file "$ENV_FILE" exec -T postgres pg_isready -U "${DB_USER}" > /dev/null 2>&1; then
+            echo -e "${GREEN}✅ PostgreSQL 준비 완료${NC}"
+            break
+        fi
+        if [ $i -eq 30 ]; then
+            echo -e "${RED}❌ PostgreSQL 준비 시간 초과${NC}"
+            exit 1
+        fi
+        sleep 1
+    done
+fi
+
+# app 컨테이너가 없으면 임시로 빌드 및 시작 (마이그레이션 실행용)
+if ! docker-compose --env-file "$ENV_FILE" ps | grep -q "adsp-quiz-backend.*Up"; then
+    echo -e "${YELLOW}⚠️  app 컨테이너가 없습니다. 마이그레이션을 위해 임시로 시작합니다...${NC}"
+    docker-compose --env-file "$ENV_FILE" build app
+    docker-compose --env-file "$ENV_FILE" up -d app
+    
+    # app 컨테이너가 준비될 때까지 대기 (최대 20초)
+    echo "app 컨테이너 준비 대기 중..."
     sleep 5
-    docker-compose --env-file "$ENV_FILE" exec -T app alembic upgrade head
+fi
+
+# 마이그레이션 실행
+if docker-compose --env-file "$ENV_FILE" exec -T app alembic upgrade head; then
     echo -e "${GREEN}✅ 마이그레이션 완료${NC}"
+else
+    echo -e "${RED}❌ 마이그레이션 실패${NC}"
+    exit 1
 fi
 
 # 4. 애플리케이션 배포
