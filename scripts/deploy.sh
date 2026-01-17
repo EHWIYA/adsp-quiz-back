@@ -89,6 +89,16 @@ fi
 
 echo -e "${GREEN}✅ 필수 환경변수 확인 완료${NC}"
 
+# Docker Compose 환경을 위한 DATABASE_URL 수정 (localhost -> postgres)
+if [[ "$DATABASE_URL" == *"localhost"* ]]; then
+    echo -e "${YELLOW}⚠️  DATABASE_URL의 localhost를 postgres로 변경합니다 (Docker Compose 네트워크 환경)${NC}"
+    DATABASE_URL_DOCKER="${DATABASE_URL//localhost/postgres}"
+    # .env 파일도 업데이트
+    sed -i "s|^DATABASE_URL=.*|DATABASE_URL=$DATABASE_URL_DOCKER|g" "$ENV_FILE"
+    export DATABASE_URL="$DATABASE_URL_DOCKER"
+    echo -e "${GREEN}✅ DATABASE_URL 업데이트 완료: ${DATABASE_URL//:*:*/***}${NC}"
+fi
+
 # 3. 데이터베이스 마이그레이션
 echo -e "\n${YELLOW}[3/5] 데이터베이스 마이그레이션 실행${NC}"
 # 프로젝트 디렉토리는 이미 시작 부분에서 이동했으므로 여기서는 이동 불필요

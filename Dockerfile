@@ -25,6 +25,10 @@ COPY migrations/ ./migrations/
 COPY alembic.ini ./
 COPY migrations/env.py ./migrations/env.py
 
+# 비root 사용자 생성 및 소유권 변경 (pip 경고 방지)
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
 # 포트 노출
 EXPOSE 8001
 
