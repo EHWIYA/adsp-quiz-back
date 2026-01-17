@@ -48,7 +48,8 @@ jobs:
             echo "최신 코드 가져오기..."
             git fetch origin
             git reset --hard origin/main
-            git clean -fd
+            # data/postgres/ 디렉토리를 제외하고 정리 (데이터 보호)
+            git clean -fd --exclude='data/postgres' || true
             
             # 3. 환경변수 파일 확인 (없으면 생성)
             if [ ! -f "$ENV_FILE" ]; then
