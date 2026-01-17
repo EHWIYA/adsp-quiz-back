@@ -123,6 +123,64 @@ jobs:
             echo "✅ 환경변수 검증 완료"
             echo "DATABASE_URL 형식 확인: ${DATABASE_URL%%@*}@***"
             
+            # 4-1. 데이터베이스 비밀번호 검증 (환경변수 업데이트 후)
+            echo "=== 데이터베이스 비밀번호 검증 ==="
+            if [ -f "${PROJECT_DIR}/scripts/verify-db-password.sh" ]; then
+              echo "✅ 비밀번호 검증 스크립트 발견: ${PROJECT_DIR}/scripts/verify-db-password.sh"
+              chmod +x "${PROJECT_DIR}/scripts/verify-db-password.sh"
+              
+              if ! "${PROJECT_DIR}/scripts/verify-db-password.sh"; then
+                echo "❌ 데이터베이스 비밀번호 검증 실패"
+                exit 1
+              fi
+              
+              echo "✅ 데이터베이스 비밀번호 검증 완료"
+            else
+              echo "⚠️  비밀번호 검증 스크립트가 없습니다. 수동 검증을 진행합니다..."
+              
+              # PostgreSQL 컨테이너가 실행 중인지 확인
+              if ! docker-compose --env-file "$ENV_FILE" ps postgres 2>/dev/null | grep -q "Up"; then
+                echo "⚠️  PostgreSQL 컨테이너가 실행 중이 아닙니다. 시작합니다..."
+                docker-compose --env-file "$ENV_FILE" up -d postgres
+                echo "PostgreSQL 컨테이너 시작 대기 중..."
+                sleep 5
+              fi
+              
+              # .env 파일에서 데이터베이스 정보 추출
+              DB_USER_FROM_ENV=$(grep "^DB_USER=" "$ENV_FILE" | cut -d'=' -f2 | tr -d '"' | tr -d "'" || echo "")
+              DB_PASSWORD_FROM_ENV=$(grep "^DB_PASSWORD=" "$ENV_FILE" | cut -d'=' -f2 | tr -d '"' | tr -d "'" || echo "")
+              DB_NAME=$(grep "^DATABASE_URL=" "$ENV_FILE" | sed -n 's/.*\/\([^?]*\).*/\1/p' | head -1)
+              if [ -z "$DB_NAME" ]; then
+                DB_NAME="adsp_quiz_db"
+              fi
+              
+              if [ -z "$DB_USER_FROM_ENV" ] || [ -z "$DB_PASSWORD_FROM_ENV" ]; then
+                echo "❌ .env 파일에서 DB_USER 또는 DB_PASSWORD를 찾을 수 없습니다."
+                exit 1
+              fi
+              
+              # PostgreSQL 연결 테스트
+              echo "PostgreSQL 연결 테스트 중..."
+              MAX_CONNECTION_RETRIES=3
+              CONNECTION_RETRY_DELAY=2
+              
+              for i in $(seq 1 $MAX_CONNECTION_RETRIES); do
+                if docker-compose --env-file "$ENV_FILE" exec -T postgres psql -U "$DB_USER_FROM_ENV" -d "$DB_NAME" -c "SELECT 1;" > /dev/null 2>&1; then
+                  echo "✅ 데이터베이스 연결 성공 (비밀번호 인증 통과)"
+                  break
+                else
+                  if [ $i -eq $MAX_CONNECTION_RETRIES ]; then
+                    echo "❌ 데이터베이스 연결 실패 (비밀번호 인증 실패)"
+                    echo "🔧 조치 방법: GitHub Secrets의 DB_PASSWORD와 서버 PostgreSQL 컨테이너의 비밀번호가 일치하는지 확인"
+                    exit 1
+                  else
+                    echo "⚠️  연결 실패 (시도 $i/$MAX_CONNECTION_RETRIES), 재시도 중..."
+                    sleep $CONNECTION_RETRY_DELAY
+                  fi
+                fi
+              done
+            fi
+            
             # 5. 배포 스크립트 실행
             echo "=== 배포 스크립트 확인 ==="
             if [ -f "${PROJECT_DIR}/scripts/deploy.sh" ]; then
