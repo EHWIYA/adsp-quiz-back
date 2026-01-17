@@ -22,7 +22,10 @@ jobs:
 
       - name: Add server to known hosts
         run: |
-          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keyscan -p ${{ secrets.SERVER_PORT || '22' }} -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts || true
+          chmod 600 ~/.ssh/known_hosts
 
       - name: Deploy to server
         env:
@@ -30,7 +33,7 @@ jobs:
           SERVER_USER: ${{ secrets.SERVER_USER }}
           SERVER_PORT: ${{ secrets.SERVER_PORT || '22' }}
         run: |
-          ssh -p ${SERVER_PORT} ${SERVER_USER}@${SERVER_HOST} << 'ENDSSH'
+          ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=~/.ssh/known_hosts -p ${SERVER_PORT} ${SERVER_USER}@${SERVER_HOST} << 'ENDSSH'
             set -e
             
             PROJECT_DIR="/opt/adsp-quiz-backend"
