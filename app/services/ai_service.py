@@ -19,16 +19,12 @@ async def generate_quiz(request: AIQuizGenerationRequest) -> AIQuizGenerationRes
     """AI를 사용하여 문제 생성 (Structured Output)"""
     client = get_openai_client()
     
-    prompt = f"""다음 텍스트를 기반으로 {request.subject_name} 과목의 객관식 문제 1개를 생성하세요.
+    # 토큰 절약을 위한 간결한 프롬프트
+    prompt = f"""{request.subject_name} 과목 객관식 문제 1개 생성
 
-텍스트:
-{request.source_text}
+텍스트: {request.source_text}
 
-요구사항:
-- 문제는 명확하고 구체적이어야 함
-- 선택지 4개 (인덱스 0-3)
-- 정답은 인덱스로 표시 (0-3)
-- 해설은 간결하고 명확하게"""
+요구: 명확한 문제, 선택지 4개(0-3), 정답 인덱스(0-3), 간결한 해설"""
 
     response = await client.beta.chat.completions.create(
         model="gpt-4o-mini",

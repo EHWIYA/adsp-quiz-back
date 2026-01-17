@@ -1,5 +1,4 @@
 import json
-import random
 from typing import Sequence
 
 from sqlalchemy import select
@@ -52,15 +51,25 @@ async def get_random_quizzes(
     subject_id: int,
     count: int,
 ) -> Sequence[Quiz]:
-    """과목별 랜덤 문제 추출"""
-    stmt = select(Quiz).where(Quiz.subject_id == subject_id)
+    """과목별 랜덤 문제 추출 (DB 레벨 최적화)"""
+    from sqlalchemy import func
+    
+    # 전체 개수 확인
+    count_stmt = select(func.count(Quiz.id)).where(Quiz.subject_id == subject_id)
+    total_count = await session.scalar(count_stmt)
+    
+    if total_count is None or total_count == 0:
+        return []
+    
+    # DB 레벨에서 랜덤 샘플링 (PostgreSQL의 ORDER BY RANDOM() 사용)
+    stmt = (
+        select(Quiz)
+        .where(Quiz.subject_id == subject_id)
+        .order_by(func.random())
+        .limit(count)
+    )
     result = await session.execute(stmt)
-    all_quizzes = result.scalars().all()
-    
-    if len(all_quizzes) < count:
-        return list(all_quizzes)
-    
-    return random.sample(list(all_quizzes), count)
+    return result.scalars().all()
 
 
 async def get_subject_by_id(session: AsyncSession, subject_id: int) -> Subject | None:
