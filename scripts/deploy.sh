@@ -16,6 +16,23 @@ ENV_FILE="${PROJECT_DIR}/env/.env"
 
 echo -e "${GREEN}=== ADsP Quiz Backend 배포 스크립트 ===${NC}"
 
+# 0. 프로젝트 루트 디렉토리로 이동 (필수)
+echo -e "\n${YELLOW}[0/5] 프로젝트 디렉토리 확인${NC}"
+cd "$PROJECT_DIR" || {
+    echo -e "${RED}❌ 프로젝트 디렉토리로 이동 실패: $PROJECT_DIR${NC}"
+    exit 1
+}
+
+echo "현재 작업 디렉토리: $(pwd)"
+echo "docker-compose 파일 확인:"
+if ls -la docker-compose*.yml 2>/dev/null; then
+    echo -e "${GREEN}✅ docker-compose 파일 확인 완료${NC}"
+else
+    echo -e "${YELLOW}⚠️  docker-compose 파일을 찾을 수 없습니다.${NC}"
+    echo "현재 디렉토리 파일 목록:"
+    ls -la
+fi
+
 # 1. 환경변수 파일 확인
 echo -e "\n${YELLOW}[1/5] 환경변수 파일 확인${NC}"
 if [ ! -f "$ENV_FILE" ]; then
@@ -74,7 +91,7 @@ echo -e "${GREEN}✅ 필수 환경변수 확인 완료${NC}"
 
 # 3. 데이터베이스 마이그레이션
 echo -e "\n${YELLOW}[3/5] 데이터베이스 마이그레이션 실행${NC}"
-cd "$PROJECT_DIR"
+# 프로젝트 디렉토리는 이미 시작 부분에서 이동했으므로 여기서는 이동 불필요
 
 if docker-compose --env-file "$ENV_FILE" ps | grep -q "adsp-quiz-postgres.*Up"; then
     echo -e "${GREEN}✅ PostgreSQL 컨테이너 실행 중${NC}"
