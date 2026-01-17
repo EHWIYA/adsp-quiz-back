@@ -153,15 +153,9 @@ if ! docker-compose --env-file "$ENV_FILE" ps | grep -q "adsp-quiz-backend.*Up";
     
     docker-compose --env-file "$ENV_FILE" build app
     
-    # docker-compose up 대신 docker run을 사용하여 ContainerConfig 오류 방지
-    # 또는 컨테이너를 완전히 제거한 후 up 실행
-    docker-compose --env-file "$ENV_FILE" up -d --no-deps --force-recreate app 2>&1 || {
-        # force-recreate가 실패하면 컨테이너를 직접 제거 후 재시도
-        echo "컨테이너 재생성 실패, 직접 제거 후 재시도..."
-        docker stop adsp-quiz-backend 2>/dev/null || true
-        docker rm -f adsp-quiz-backend 2>/dev/null || true
-        docker-compose --env-file "$ENV_FILE" up -d --no-deps app
-    }
+    # 컨테이너를 완전히 제거한 후 up 실행 (ContainerConfig 오류 방지)
+    # --force-recreate는 ContainerConfig 오류를 발생시킬 수 있으므로 사용하지 않음
+    docker-compose --env-file "$ENV_FILE" up -d --no-deps app
     
     # app 컨테이너가 준비될 때까지 대기 (최대 20초)
     echo "app 컨테이너 준비 대기 중..."
