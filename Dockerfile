@@ -14,11 +14,10 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Python 의존성 설치
+# pyproject.toml과 app 디렉토리를 먼저 복사 (pip install -e . 실행을 위해 필요)
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir -e .
-
-# 애플리케이션 코드 복사
 COPY app/ ./app/
+RUN pip install --no-cache-dir -e .
 
 # ⚠️ 중요: migrations 디렉토리 및 Alembic 설정 파일 복사 (필수!)
 # 이 부분이 없으면 마이그레이션이 실행되지 않습니다.
