@@ -65,19 +65,6 @@ jobs:
             
             # 4. 환경변수 업데이트 (GitHub Secrets에서)
             echo "환경변수 업데이트..."
-            cat > /tmp/env_update.sh << 'ENVSCRIPT'
-              # GitHub Secrets에서 환경변수 업데이트
-              sed -i "s|^DATABASE_URL=.*|DATABASE_URL=$DATABASE_URL|g" "$ENV_FILE"
-              sed -i "s|^DB_USER=.*|DB_USER=$DB_USER|g" "$ENV_FILE"
-              sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=$DB_PASSWORD|g" "$ENV_FILE"
-              sed -i "s|^GEMINI_API_KEY=.*|GEMINI_API_KEY=$GEMINI_API_KEY|g" "$ENV_FILE"
-              sed -i "s|^SECRET_KEY=.*|SECRET_KEY=$SECRET_KEY|g" "$ENV_FILE"
-              sed -i "s|^ALLOWED_ORIGINS=.*|ALLOWED_ORIGINS=$ALLOWED_ORIGINS|g" "$ENV_FILE"
-              sed -i "s|^ENVIRONMENT=.*|ENVIRONMENT=production|g" "$ENV_FILE"
-              sed -i "s|^PORT=.*|PORT=8001|g" "$ENV_FILE"
-            ENVSCRIPT
-            
-            # 환경변수 전달 및 실행
             DATABASE_URL="${{ secrets.DATABASE_URL }}"
             DB_USER="${{ secrets.DB_USER }}"
             DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
@@ -86,16 +73,35 @@ jobs:
             ALLOWED_ORIGINS="${{ secrets.ALLOWED_ORIGINS }}"
             
             export DATABASE_URL DB_USER DB_PASSWORD GEMINI_API_KEY SECRET_KEY ALLOWED_ORIGINS
-            bash /tmp/env_update.sh
-            rm /tmp/env_update.sh
+            
+            # 환경변수 직접 업데이트 (heredoc 사용 안 함 - 직접 sed 실행)
+            sed -i "s|^DATABASE_URL=.*|DATABASE_URL=\$DATABASE_URL|g" "$ENV_FILE"
+            sed -i "s|^DB_USER=.*|DB_USER=\$DB_USER|g" "$ENV_FILE"
+            sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=\$DB_PASSWORD|g" "$ENV_FILE"
+            sed -i "s|^GEMINI_API_KEY=.*|GEMINI_API_KEY=\$GEMINI_API_KEY|g" "$ENV_FILE"
+            sed -i "s|^SECRET_KEY=.*|SECRET_KEY=\$SECRET_KEY|g" "$ENV_FILE"
+            sed -i "s|^ALLOWED_ORIGINS=.*|ALLOWED_ORIGINS=\$ALLOWED_ORIGINS|g" "$ENV_FILE"
+            sed -i "s|^ENVIRONMENT=.*|ENVIRONMENT=production|g" "$ENV_FILE"
+            sed -i "s|^PORT=.*|PORT=8001|g" "$ENV_FILE"
+            
+            echo "✅ 환경변수 업데이트 완료"
             
             # 5. 배포 스크립트 실행
+            echo "=== 배포 스크립트 확인 ==="
             if [ -f "${PROJECT_DIR}/scripts/deploy.sh" ]; then
-              echo "배포 스크립트 실행..."
+              echo "✅ 배포 스크립트 발견: ${PROJECT_DIR}/scripts/deploy.sh"
+              echo "배포 스크립트 실행 중..."
               chmod +x "${PROJECT_DIR}/scripts/deploy.sh"
-              "${PROJECT_DIR}/scripts/deploy.sh"
+              
+              if ! "${PROJECT_DIR}/scripts/deploy.sh"; then
+                echo "❌ 배포 스크립트 실행 실패"
+                exit 1
+              fi
+              
+              echo "✅ 배포 스크립트 실행 완료"
             else
-              echo "배포 스크립트가 없습니다. 수동 배포를 진행합니다..."
+              echo "⚠️  배포 스크립트가 없습니다. 수동 배포를 진행합니다..."
+              echo "수동 배포 시작..."
               
               # 수동 배포
               docker-compose --env-file "$ENV_FILE" down || true
@@ -119,20 +125,40 @@ jobs:
                 docker-compose --env-file "$ENV_FILE" logs app | tail -20
                 exit 1
               fi
+              
+              echo "✅ 수동 배포 완료"
             fi
             
             # 6. 헬스체크
-            echo "헬스체크 확인..."
-            sleep 10
-            HEALTH_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://adsp-api.livbee.co.kr/health || echo "000")
+            echo "=== 헬스체크 시작 ==="
+            HEALTH_CHECK_URL="https://adsp-api.livbee.co.kr/health"
+            MAX_RETRIES=5
+            RETRY_DELAY=10
             
-            if [ "$HEALTH_RESPONSE" = "200" ]; then
-              echo "✅ 배포 성공! 헬스체크 통과 (HTTP $HEALTH_RESPONSE)"
-            else
-              echo "⚠️  헬스체크 응답: HTTP $HEALTH_RESPONSE"
-              echo "로그 확인: docker-compose --env-file $ENV_FILE logs app"
-              exit 1
-            fi
+            for i in $(seq 1 $MAX_RETRIES); do
+              echo "헬스체크 시도 $i/$MAX_RETRIES..."
+              sleep $RETRY_DELAY
+              
+              HEALTH_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_CHECK_URL" || echo "000")
+              echo "헬스체크 응답: HTTP $HEALTH_RESPONSE"
+              
+              if [ "$HEALTH_RESPONSE" = "200" ]; then
+                echo "✅ 배포 성공! 헬스체크 통과 (HTTP $HEALTH_RESPONSE)"
+                break
+              else
+                if [ $i -eq $MAX_RETRIES ]; then
+                  echo "❌ 헬스체크 실패 (최대 재시도 횟수 도달)"
+                  echo "최종 응답 코드: HTTP $HEALTH_RESPONSE"
+                  echo "애플리케이션 로그:"
+                  docker-compose --env-file "$ENV_FILE" logs app | tail -50
+                  echo "컨테이너 상태:"
+                  docker-compose --env-file "$ENV_FILE" ps
+                  exit 1
+                else
+                  echo "⚠️  헬스체크 실패 (HTTP $HEALTH_RESPONSE), 재시도 중..."
+                fi
+              fi
+            done
             
             echo "=== 배포 완료 ==="
           ENDSSH
