@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     db_user: str = ""
     db_password: str = ""
 
-    # OpenAI
-    openai_api_key: str = ""
+    # AI Provider (Gemini)
+    gemini_api_key: str = ""
 
     # Security
     secret_key: str = ""

@@ -1,70 +1,86 @@
-from openai import AsyncOpenAI
+import json
+
+import google.generativeai as genai
 
 from app.core.config import settings
 from app.schemas.ai import AIQuizGenerationRequest, AIQuizGenerationResponse
 
-
-_client: AsyncOpenAI | None = None
-
-
-def get_openai_client() -> AsyncOpenAI:
-    """OpenAI 클라이언트 싱글톤"""
-    global _client
-    if _client is None:
-        _client = AsyncOpenAI(api_key=settings.openai_api_key)
-    return _client
+_gemini_client: genai.GenerativeModel | None = None
 
 
-async def generate_quiz(request: AIQuizGenerationRequest) -> AIQuizGenerationResponse:
-    """AI를 사용하여 문제 생성 (Structured Output)"""
-    client = get_openai_client()
+def get_gemini_client() -> genai.GenerativeModel:
+    """Gemini 클라이언트 싱글톤"""
+    global _gemini_client
+    if _gemini_client is None:
+        genai.configure(api_key=settings.gemini_api_key)
+        _gemini_client = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            generation_config={
+                "temperature": 0.7,
+                "response_mime_type": "application/json",
+            },
+        )
+    return _gemini_client
+
+
+async def generate_quiz_with_gemini(request: AIQuizGenerationRequest) -> AIQuizGenerationResponse:
+    """Gemini를 사용하여 문제 생성 (무료)"""
+    import asyncio
     
-    # 토큰 절약을 위한 간결한 프롬프트
-    prompt = f"""{request.subject_name} 과목 객관식 문제 1개 생성
+    client = get_gemini_client()
+    
+    prompt = f"""당신은 교육용 문제 생성 전문가입니다.
+
+{request.subject_name} 과목 객관식 문제 1개를 생성하세요.
 
 텍스트: {request.source_text}
 
-요구: 명확한 문제, 선택지 4개(0-3), 정답 인덱스(0-3), 간결한 해설"""
+다음 JSON 형식으로 응답하세요:
+{{
+  "question": "문제 내용",
+  "options": [
+    {{"index": 0, "text": "선택지 1"}},
+    {{"index": 1, "text": "선택지 2"}},
+    {{"index": 2, "text": "선택지 3"}},
+    {{"index": 3, "text": "선택지 4"}}
+  ],
+  "correct_answer": 0,
+  "explanation": "해설"
+}}
 
-    response = await client.beta.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "당신은 교육용 문제 생성 전문가입니다."},
-            {"role": "user", "content": prompt},
-        ],
-        response_format={"type": "json_schema", "json_schema": {
-            "name": "quiz_generation",
-            "strict": True,
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "question": {"type": "string"},
-                    "options": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "index": {"type": "integer", "minimum": 0, "maximum": 3},
-                                "text": {"type": "string"},
-                            },
-                            "required": ["index", "text"],
-                        },
-                        "minItems": 4,
-                        "maxItems": 4,
-                    },
-                    "correct_answer": {"type": "integer", "minimum": 0, "maximum": 3},
-                    "explanation": {"type": "string"},
-                },
-                "required": ["question", "options", "correct_answer", "explanation"],
-            },
-        }},
-        temperature=0.7,
+요구사항:
+- 명확한 문제
+- 선택지 4개 (index: 0-3)
+- 정답 인덱스 (0-3)
+- 간결한 해설"""
+
+    # Gemini는 동기 API이므로 asyncio로 래핑
+    loop = asyncio.get_event_loop()
+    response = await loop.run_in_executor(
+        None,
+        lambda: client.generate_content(prompt)
     )
-
-    result = response.choices[0].message.content
+    
+    result = response.text
     if not result:
         raise ValueError("AI 응답이 비어있습니다")
     
-    import json
+    # JSON 파싱 (마크다운 코드 블록 제거)
+    result = result.strip()
+    if result.startswith("```json"):
+        result = result[7:]
+    if result.startswith("```"):
+        result = result[3:]
+    if result.endswith("```"):
+        result = result[:-3]
+    result = result.strip()
+    
     data = json.loads(result)
     return AIQuizGenerationResponse(**data)
+
+
+async def generate_quiz(request: AIQuizGenerationRequest) -> AIQuizGenerationResponse:
+    """AI를 사용하여 문제 생성 (Gemini 사용)"""
+    if not settings.gemini_api_key:
+        raise ValueError("GEMINI_API_KEY가 설정되지 않았습니다")
+    return await generate_quiz_with_gemini(request)

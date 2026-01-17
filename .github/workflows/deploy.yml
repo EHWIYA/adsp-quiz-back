@@ -1,0 +1,131 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # 수동 실행 가능
+
+jobs:
+  deploy:
+    name: Deploy to Server
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add server to known hosts
+        run: |
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to server
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT || '22' }}
+        run: |
+          ssh -p ${SERVER_PORT} ${SERVER_USER}@${SERVER_HOST} << 'ENDSSH'
+            set -e
+            
+            PROJECT_DIR="/opt/adsp-quiz-backend"
+            ENV_FILE="${PROJECT_DIR}/env/.env"
+            
+            echo "=== GitHub Actions 배포 시작 ==="
+            
+            # 1. 프로젝트 디렉토리로 이동
+            cd "$PROJECT_DIR"
+            
+            # 2. 최신 코드 가져오기
+            echo "최신 코드 가져오기..."
+            git fetch origin
+            git reset --hard origin/main
+            git clean -fd
+            
+            # 3. 환경변수 파일 확인 (없으면 생성)
+            if [ ! -f "$ENV_FILE" ]; then
+              echo "환경변수 파일이 없습니다. 템플릿에서 생성합니다..."
+              if [ -f "${PROJECT_DIR}/env/.env.template" ]; then
+                cp "${PROJECT_DIR}/env/.env.template" "$ENV_FILE"
+                chmod 600 "$ENV_FILE"
+              else
+                echo "템플릿 파일이 없습니다. 수동으로 생성해야 합니다."
+                exit 1
+              fi
+            fi
+            
+            # 4. 환경변수 업데이트 (GitHub Secrets에서)
+            echo "환경변수 업데이트..."
+            cat > /tmp/env_update.sh << 'ENVSCRIPT'
+              # GitHub Secrets에서 환경변수 업데이트
+              sed -i "s|^DATABASE_URL=.*|DATABASE_URL=$DATABASE_URL|g" "$ENV_FILE"
+              sed -i "s|^DB_USER=.*|DB_USER=$DB_USER|g" "$ENV_FILE"
+              sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=$DB_PASSWORD|g" "$ENV_FILE"
+              sed -i "s|^GEMINI_API_KEY=.*|GEMINI_API_KEY=$GEMINI_API_KEY|g" "$ENV_FILE"
+              sed -i "s|^SECRET_KEY=.*|SECRET_KEY=$SECRET_KEY|g" "$ENV_FILE"
+              sed -i "s|^ALLOWED_ORIGINS=.*|ALLOWED_ORIGINS=$ALLOWED_ORIGINS|g" "$ENV_FILE"
+              sed -i "s|^ENVIRONMENT=.*|ENVIRONMENT=production|g" "$ENV_FILE"
+              sed -i "s|^PORT=.*|PORT=8001|g" "$ENV_FILE"
+            ENVSCRIPT
+            
+            # 환경변수 전달 및 실행
+            DATABASE_URL="${{ secrets.DATABASE_URL }}"
+            DB_USER="${{ secrets.DB_USER }}"
+            DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
+            GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY || '' }}"
+            SECRET_KEY="${{ secrets.SECRET_KEY }}"
+            ALLOWED_ORIGINS="${{ secrets.ALLOWED_ORIGINS }}"
+            
+            export DATABASE_URL DB_USER DB_PASSWORD GEMINI_API_KEY SECRET_KEY ALLOWED_ORIGINS
+            bash /tmp/env_update.sh
+            rm /tmp/env_update.sh
+            
+            # 5. 배포 스크립트 실행
+            if [ -f "${PROJECT_DIR}/scripts/deploy.sh" ]; then
+              echo "배포 스크립트 실행..."
+              chmod +x "${PROJECT_DIR}/scripts/deploy.sh"
+              "${PROJECT_DIR}/scripts/deploy.sh"
+            else
+              echo "배포 스크립트가 없습니다. 수동 배포를 진행합니다..."
+              
+              # 수동 배포
+              docker-compose --env-file "$ENV_FILE" down || true
+              docker-compose --env-file "$ENV_FILE" build --no-cache
+              docker-compose --env-file "$ENV_FILE" up -d
+              
+              # 마이그레이션 실행
+              sleep 5
+              docker-compose --env-file "$ENV_FILE" exec -T app alembic upgrade head || true
+            fi
+            
+            # 6. 헬스체크
+            echo "헬스체크 확인..."
+            sleep 10
+            HEALTH_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://adsp-api.livbee.co.kr/health || echo "000")
+            
+            if [ "$HEALTH_RESPONSE" = "200" ]; then
+              echo "✅ 배포 성공! 헬스체크 통과 (HTTP $HEALTH_RESPONSE)"
+            else
+              echo "⚠️  헬스체크 응답: HTTP $HEALTH_RESPONSE"
+              echo "로그 확인: docker-compose --env-file $ENV_FILE logs app"
+              exit 1
+            fi
+            
+            echo "=== 배포 완료 ==="
+          ENDSSH
+
+      - name: Deployment status
+        if: success()
+        run: |
+          echo "✅ 배포가 성공적으로 완료되었습니다!"
+          echo "애플리케이션 URL: https://adsp-api.livbee.co.kr"
+
+      - name: Deployment failed
+        if: failure()
+        run: |
+          echo "❌ 배포가 실패했습니다. 서버 로그를 확인하세요."
