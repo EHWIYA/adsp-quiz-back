@@ -102,10 +102,15 @@ if [[ "$DATABASE_URL" == *"localhost"* ]]; then
     if docker-compose --env-file "$ENV_FILE" ps | grep -q "adsp-quiz-backend.*Up"; then
         echo -e "${YELLOW}⚠️  실행 중인 app 컨테이너를 완전히 제거하고 재생성하여 새로운 DATABASE_URL을 적용합니다...${NC}"
         # docker-compose 명령어 대신 docker 명령어로 직접 제거 (ContainerConfig 오류 방지)
-        docker stop adsp-quiz-backend 2>/dev/null || true
-        docker rm -f adsp-quiz-backend 2>/dev/null || true
-        # 컨테이너 이름으로 검색하여 모든 관련 컨테이너 제거
+        echo "기존 컨테이너 완전 제거 중..."
         docker ps -a --filter "name=adsp-quiz-backend" --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
+        
+        # 컨테이너 이름으로 검색하여 모든 관련 컨테이너 제거
+        for container_id in $(docker ps -a --format "{{.ID}}" --filter "name=adsp-quiz-backend"); do
+            echo "컨테이너 제거: $container_id"
+            docker rm -f "$container_id" 2>/dev/null || true
+        done
+        
         # 컨테이너를 완전히 제거한 후 up 실행 (ContainerConfig 오류 방지)
         docker-compose --env-file "$ENV_FILE" up -d --no-deps app 2>&1 || {
             echo "컨테이너 시작 실패, 재시도..."
@@ -145,11 +150,14 @@ if ! docker-compose --env-file "$ENV_FILE" ps | grep -q "adsp-quiz-backend.*Up";
     echo -e "${YELLOW}⚠️  app 컨테이너가 없습니다. 마이그레이션을 위해 임시로 시작합니다...${NC}"
     
     # 기존 컨테이너가 있으면 완전히 제거 (ContainerConfig 오류 방지)
-    if docker ps -a --format '{{.Names}}' | grep -q "^adsp-quiz-backend$"; then
-        echo "기존 컨테이너 제거 중..."
-        docker stop adsp-quiz-backend 2>/dev/null || true
-        docker rm -f adsp-quiz-backend 2>/dev/null || true
-    fi
+    echo "기존 컨테이너 완전 제거 중..."
+    docker ps -a --filter "name=adsp-quiz-backend" --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
+    
+    # 컨테이너 이름으로 검색하여 모든 관련 컨테이너 제거
+    for container_id in $(docker ps -a --format "{{.ID}}" --filter "name=adsp-quiz-backend"); do
+        echo "컨테이너 제거: $container_id"
+        docker rm -f "$container_id" 2>/dev/null || true
+    done
     
     docker-compose --env-file "$ENV_FILE" build app
     
@@ -177,11 +185,27 @@ fi
 # 4. 애플리케이션 배포
 echo -e "\n${YELLOW}[4/5] 애플리케이션 배포${NC}"
 
-# 기존 컨테이너 중지
-docker-compose --env-file "$ENV_FILE" down
+# 기존 컨테이너 중지 및 제거 (ContainerConfig 오류 방지)
+echo "기존 컨테이너 중지 및 제거 중..."
+# app 컨테이너만 중지 (postgres는 데이터 보호를 위해 유지)
+docker-compose --env-file "$ENV_FILE" stop app || true
+
+# app 컨테이너만 docker 명령어로 직접 제거 (ContainerConfig 오류 완전 해결)
+# postgres 컨테이너는 데이터 보호를 위해 제거하지 않음
+echo "app 컨테이너 직접 제거 중..."
+docker ps -a --filter "name=adsp-quiz-backend" --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
+
+# 컨테이너 이름으로 검색하여 app 컨테이너만 제거
+for container_id in $(docker ps -a --format "{{.ID}}" --filter "name=adsp-quiz-backend"); do
+    echo "컨테이너 제거: $container_id"
+    docker rm -f "$container_id" 2>/dev/null || true
+done
 
 # 새로 빌드 및 시작
+echo "새 이미지 빌드 중..."
 docker-compose --env-file "$ENV_FILE" build --no-cache
+
+echo "컨테이너 시작 중..."
 docker-compose --env-file "$ENV_FILE" up -d
 
 # 컨테이너 상태 확인
