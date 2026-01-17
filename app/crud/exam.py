@@ -30,8 +30,9 @@ async def create_exam_record(
         is_correct=is_correct,
     )
     session.add(record)
-    await session.commit()
-    await session.refresh(record)
+    # commit은 호출하는 쪽에서 일괄 처리하도록 변경 (트랜잭션 일관성)
+    # await session.commit()
+    # await session.refresh(record)
     return record
 
 
