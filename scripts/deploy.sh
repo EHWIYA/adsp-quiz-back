@@ -89,6 +89,14 @@ fi
 
 echo -e "${GREEN}✅ 필수 환경변수 확인 완료${NC}"
 
+# DATABASE_URL 형식 검증 (사용자명과 비밀번호 포함 여부 확인)
+if ! echo "$DATABASE_URL" | grep -qE '^postgresql(\+asyncpg)?://[^@]+@'; then
+    echo -e "${RED}❌ DATABASE_URL 형식이 올바르지 않습니다.${NC}"
+    echo "현재 DATABASE_URL: ${DATABASE_URL:0:80}..."
+    echo "올바른 형식: postgresql+asyncpg://user:password@host:port/dbname"
+    exit 1
+fi
+
 # Docker Compose 환경을 위한 DATABASE_URL 수정 (localhost -> postgres)
 if [[ "$DATABASE_URL" == *"localhost"* ]]; then
     echo -e "${YELLOW}⚠️  DATABASE_URL의 localhost를 postgres로 변경합니다 (Docker Compose 네트워크 환경)${NC}"
@@ -97,6 +105,17 @@ if [[ "$DATABASE_URL" == *"localhost"* ]]; then
     sed -i "s|^DATABASE_URL=.*|DATABASE_URL=$DATABASE_URL_DOCKER|g" "$ENV_FILE"
     export DATABASE_URL="$DATABASE_URL_DOCKER"
     echo -e "${GREEN}✅ DATABASE_URL 업데이트 완료: ${DATABASE_URL//:*:*/***}${NC}"
+    
+    # 업데이트 후 형식 재검증
+    if ! echo "$DATABASE_URL" | grep -qE '^postgresql(\+asyncpg)?://[^@]+@'; then
+        echo -e "${RED}❌ DATABASE_URL 업데이트 후 형식 검증 실패${NC}"
+        echo "업데이트된 DATABASE_URL: ${DATABASE_URL:0:80}..."
+        exit 1
+    fi
+    
+    # .env 파일에서 DATABASE_URL 확인 (디버깅용)
+    echo "업데이트된 .env 파일의 DATABASE_URL 확인:"
+    grep "^DATABASE_URL=" "$ENV_FILE" | sed 's/:[^:]*@/:***@/' || echo "⚠️  DATABASE_URL을 찾을 수 없습니다."
     
     # 실행 중인 컨테이너가 있으면 완전히 제거한 후 재생성하여 새로운 환경변수 적용
     if docker-compose --env-file "$ENV_FILE" ps | grep -q "adsp-quiz-backend.*Up"; then
@@ -170,6 +189,16 @@ if ! docker-compose --env-file "$ENV_FILE" ps | grep -q "adsp-quiz-backend.*Up";
     sleep 5
 fi
 
+# 마이그레이션 실행 전 환경변수 확인
+echo "마이그레이션 실행 전 환경변수 확인..."
+echo "현재 DATABASE_URL: ${DATABASE_URL%%@*}@***"
+echo ".env 파일의 DATABASE_URL:"
+grep "^DATABASE_URL=" "$ENV_FILE" | sed 's/:[^:]*@/:***@/' || echo "⚠️  DATABASE_URL을 찾을 수 없습니다."
+
+# 컨테이너 내부 환경변수 확인 (디버깅용)
+echo "컨테이너 내부 DATABASE_URL 확인:"
+docker-compose --env-file "$ENV_FILE" exec -T app env | grep DATABASE_URL | sed 's/:[^:]*@/:***@/' || echo "⚠️  DATABASE_URL이 설정되지 않았습니다."
+
 # 마이그레이션 실행 (환경변수를 직접 전달하여 DATABASE_URL 사용)
 echo "마이그레이션 실행 중..."
 if docker-compose --env-file "$ENV_FILE" exec -T -e DATABASE_URL="$DATABASE_URL" app alembic upgrade head; then
@@ -179,6 +208,8 @@ else
     echo "현재 DATABASE_URL: ${DATABASE_URL//:*:*/***}"
     echo "컨테이너 내부 환경변수 확인:"
     docker-compose --env-file "$ENV_FILE" exec -T app env | grep DATABASE_URL || echo "DATABASE_URL이 설정되지 않았습니다."
+    echo ".env 파일 내용 확인:"
+    grep "^DATABASE_URL=" "$ENV_FILE" || echo "DATABASE_URL이 .env 파일에 없습니다."
     exit 1
 fi
 
