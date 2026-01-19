@@ -78,6 +78,7 @@ jobs:
             export DB_USER="${{ secrets.DB_USER }}"
             export DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
             export GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY || '' }}"
+            export GEMINI_MAX_CONCURRENT="${{ secrets.GEMINI_MAX_CONCURRENT || '2' }}"
             export SECRET_KEY="${{ secrets.SECRET_KEY }}"
             export ALLOWED_ORIGINS="${{ secrets.ALLOWED_ORIGINS }}"
             export ENV_FILE PROJECT_DIR
