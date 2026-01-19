@@ -28,10 +28,12 @@ async def create_quiz(
     source_hash: str,
     source_url: str | None = None,
     source_text: str | None = None,
+    sub_topic_id: int | None = None,
 ) -> Quiz:
     """문제 생성"""
     quiz = Quiz(
         subject_id=subject_id,
+        sub_topic_id=sub_topic_id,
         question=ai_response.question,
         options=ai_response.options_json,
         correct_answer=ai_response.correct_answer,
@@ -114,3 +116,33 @@ async def get_all_subjects_with_quiz_count(session: AsyncSession) -> list[dict]:
             "quiz_count": row.quiz_count or 0,
         })
     return subjects
+
+
+async def get_quizzes_by_sub_topic_id(
+    session: AsyncSession,
+    sub_topic_id: int,
+    count: int,
+) -> Sequence[Quiz]:
+    """세부항목별 문제 조회 (캐시 조회용)"""
+    from sqlalchemy import func
+    
+    stmt = (
+        select(Quiz)
+        .where(Quiz.sub_topic_id == sub_topic_id)
+        .order_by(func.random())
+        .limit(count)
+    )
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+
+async def get_quiz_count_by_sub_topic_id(
+    session: AsyncSession,
+    sub_topic_id: int,
+) -> int:
+    """세부항목별 문제 개수 조회"""
+    from sqlalchemy import func
+    
+    count_stmt = select(func.count(Quiz.id)).where(Quiz.sub_topic_id == sub_topic_id)
+    total_count = await session.scalar(count_stmt)
+    return total_count or 0

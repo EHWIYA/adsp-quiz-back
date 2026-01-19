@@ -15,3 +15,8 @@ class Subject(Base, TimestampMixin):
         back_populates="subject",
         cascade="all, delete-orphan",
     )
+    main_topics: Mapped[list["MainTopic"]] = relationship(
+        "MainTopic",
+        back_populates="subject",
+        cascade="all, delete-orphan",
+    )

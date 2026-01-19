@@ -1,0 +1,27 @@
+from typing import Sequence
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.sub_topic import SubTopic
+
+
+async def get_sub_topic_by_id(session: AsyncSession, sub_topic_id: int) -> SubTopic | None:
+    """ID로 세부항목 조회"""
+    result = await session.execute(select(SubTopic).where(SubTopic.id == sub_topic_id))
+    return result.scalar_one_or_none()
+
+
+async def get_sub_topics_by_main_topic_id(session: AsyncSession, main_topic_id: int) -> Sequence[SubTopic]:
+    """주요항목 ID로 세부항목 목록 조회"""
+    result = await session.execute(
+        select(SubTopic)
+        .where(SubTopic.main_topic_id == main_topic_id)
+        .order_by(SubTopic.id)
+    )
+    return result.scalars().all()
+
+
+async def get_sub_topic_with_core_content(session: AsyncSession, sub_topic_id: int) -> SubTopic | None:
+    """세부항목 조회 (핵심 정보 포함)"""
+    return await get_sub_topic_by_id(session, sub_topic_id)

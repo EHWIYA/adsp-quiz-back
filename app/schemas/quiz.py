@@ -90,6 +90,18 @@ class QuizCreateRequest(BaseModel):
         return v
 
 
+class StudyModeQuizCreateRequest(BaseModel):
+    """학습 모드 문제 생성 요청 스키마 (10개 일괄 생성)"""
+    sub_topic_id: int = Field(..., description="세부항목 ID (필수)")
+    quiz_count: int = Field(default=10, ge=1, le=50, description="생성할 문제 개수 (기본값: 10, 최대: 50)")
+
+
+class StudyModeQuizListResponse(BaseModel):
+    """학습 모드 문제 목록 응답 스키마"""
+    quizzes: list[QuizResponse]
+    total_count: int
+
+
 class ExamStartRequest(BaseModel):
     """시험 시작 요청 스키마"""
     subject_id: int = Field(..., description="과목 ID")
@@ -199,4 +211,38 @@ class SubjectResponse(BaseModel):
 class SubjectListResponse(BaseModel):
     """과목 목록 응답 스키마"""
     subjects: list[SubjectResponse]
+    total: int
+
+
+class MainTopicResponse(BaseModel):
+    """주요항목 응답 스키마"""
+    id: int
+    name: str
+    description: str | None
+    subject_id: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class MainTopicListResponse(BaseModel):
+    """주요항목 목록 응답 스키마"""
+    main_topics: list[MainTopicResponse]
+    total: int
+
+
+class SubTopicResponse(BaseModel):
+    """세부항목 응답 스키마"""
+    id: int
+    name: str
+    description: str | None
+    main_topic_id: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SubTopicListResponse(BaseModel):
+    """세부항목 목록 응답 스키마"""
+    sub_topics: list[SubTopicResponse]
     total: int
