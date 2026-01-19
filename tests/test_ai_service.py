@@ -13,7 +13,9 @@ async def test_generate_quiz_success():
     mock_response.text = '{"question": "테스트 문제", "options": [{"index": 0, "text": "선택지1"}, {"index": 1, "text": "선택지2"}, {"index": 2, "text": "선택지3"}, {"index": 3, "text": "선택지4"}], "correct_answer": 0, "explanation": "설명"}'
     
     mock_client = MagicMock()
-    mock_client.generate_content = MagicMock(return_value=mock_response)
+    mock_models = MagicMock()
+    mock_models.generate_content = MagicMock(return_value=mock_response)
+    mock_client.models = mock_models
     
     with patch("app.services.ai_service.get_gemini_client", return_value=mock_client):
         request = AIQuizGenerationRequest(
@@ -35,7 +37,9 @@ async def test_generate_quiz_empty_response():
     mock_response.text = None
     
     mock_client = MagicMock()
-    mock_client.generate_content = MagicMock(return_value=mock_response)
+    mock_models = MagicMock()
+    mock_models.generate_content = MagicMock(return_value=mock_response)
+    mock_client.models = mock_models
     
     with patch("app.services.ai_service.get_gemini_client", return_value=mock_client):
         request = AIQuizGenerationRequest(

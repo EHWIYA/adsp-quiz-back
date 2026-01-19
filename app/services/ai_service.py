@@ -1,25 +1,23 @@
 import json
+import os
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from app.core.config import settings
 from app.schemas.ai import AIQuizGenerationRequest, AIQuizGenerationResponse
 
-_gemini_client: genai.GenerativeModel | None = None
+_gemini_client: genai.Client | None = None
 
 
-def get_gemini_client() -> genai.GenerativeModel:
+def get_gemini_client() -> genai.Client:
     """Gemini 클라이언트 싱글톤"""
     global _gemini_client
     if _gemini_client is None:
-        genai.configure(api_key=settings.gemini_api_key)
-        _gemini_client = genai.GenerativeModel(
-            model_name="gemini-1.5-flash-latest",
-            generation_config={
-                "temperature": 0.7,
-                "response_mime_type": "application/json",
-            },
-        )
+        api_key = settings.gemini_api_key or os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY가 설정되지 않았습니다")
+        _gemini_client = genai.Client(api_key=api_key)
     return _gemini_client
 
 
@@ -58,7 +56,14 @@ async def generate_quiz_with_gemini(request: AIQuizGenerationRequest) -> AIQuizG
     loop = asyncio.get_event_loop()
     response = await loop.run_in_executor(
         None,
-        lambda: client.generate_content(prompt)
+        lambda: client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.7,
+                response_mime_type="application/json",
+            ),
+        )
     )
     
     result = response.text
