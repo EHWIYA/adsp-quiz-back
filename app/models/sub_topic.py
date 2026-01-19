@@ -11,7 +11,7 @@ class SubTopic(Base, TimestampMixin):
     main_topic_id: Mapped[int] = mapped_column(ForeignKey("main_topics.id"), nullable=False)
     name: Mapped[str] = mapped_column(nullable=False)
     description: Mapped[str | None] = mapped_column(Text, default=None)
-    core_content: Mapped[str | None] = mapped_column(Text, default=None, description="핵심 정보 텍스트")
+    core_content: Mapped[str | None] = mapped_column(Text, default=None, comment="핵심 정보 텍스트")
 
     main_topic: Mapped["MainTopic"] = relationship("MainTopic", back_populates="sub_topics")
     quizzes: Mapped[list["Quiz"]] = relationship(
