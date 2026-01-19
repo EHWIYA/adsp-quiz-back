@@ -39,7 +39,28 @@ jobs:
             PROJECT_DIR="/opt/adsp-quiz-backend"
             ENV_FILE="${PROJECT_DIR}/env/.env"
             
+            # 프로젝트 디렉토리 확인 및 생성
+            if [ ! -d "$PROJECT_DIR" ]; then
+              echo "📦 프로젝트 디렉토리 생성 중..."
+              sudo mkdir -p "$PROJECT_DIR"
+              sudo chown -R ${USER}:${USER} "$PROJECT_DIR" || true
+            fi
+            
             cd "$PROJECT_DIR" || exit 1
+            
+            # Git 저장소 초기화 또는 동기화
+            if [ ! -d ".git" ]; then
+              echo "📦 Git 저장소 초기화 중..."
+              git init || true
+              git remote add origin https://github.com/EHWIYA/adsp-quiz-back.git || git remote set-url origin https://github.com/EHWIYA/adsp-quiz-back.git || true
+            fi
+            
+            # 최신 코드 동기화 (스크립트 실행 전 필수)
+            echo "📦 [0/8] Git 코드 동기화 시작..."
+            git fetch origin || true
+            git reset --hard origin/main || true
+            git clean -fd --exclude='data/postgres' || true
+            echo "✅ 코드 동기화 완료"
             
             # 환경변수 설정 (GitHub Secrets에서 주입)
             export DATABASE_URL="${{ secrets.DATABASE_URL }}"
@@ -56,6 +77,9 @@ jobs:
               "${PROJECT_DIR}/scripts/deploy/github-actions-deploy.sh" || exit 1
             else
               echo "❌ GitHub Actions 배포 스크립트를 찾을 수 없습니다."
+              echo "현재 디렉토리: $(pwd)"
+              echo "스크립트 경로: ${PROJECT_DIR}/scripts/deploy/github-actions-deploy.sh"
+              ls -la "${PROJECT_DIR}/scripts/deploy/" 2>/dev/null || echo "scripts/deploy 디렉토리가 존재하지 않습니다."
               exit 1
             fi
           ENDSSH
