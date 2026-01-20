@@ -37,7 +37,10 @@ async def get_core_content(
         logger.warning(f"세부항목을 찾을 수 없음: sub_topic_id={sub_topic_id}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"세부항목을 찾을 수 없습니다: {sub_topic_id}",
+            detail={
+                "code": "NOT_FOUND",
+                "detail": f"세부항목을 찾을 수 없습니다: {sub_topic_id}",
+            },
         )
     
     logger.info(f"세부항목 핵심 정보 조회 완료: sub_topic_id={sub_topic_id}, name={sub_topic.name}, core_content={'있음' if sub_topic.core_content else '없음'}")

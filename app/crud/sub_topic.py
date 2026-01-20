@@ -48,6 +48,7 @@ async def update_sub_topic_core_content(
     session: AsyncSession,
     sub_topic_id: int,
     core_content: str,
+    source_type: str,
 ) -> SubTopic | None:
     """세부항목 핵심 정보 업데이트"""
     sub_topic = await get_sub_topic_by_id(session, sub_topic_id)
@@ -55,6 +56,7 @@ async def update_sub_topic_core_content(
         return None
     
     sub_topic.core_content = core_content
+    sub_topic.source_type = source_type
     await session.commit()
     await session.refresh(sub_topic)
     return sub_topic

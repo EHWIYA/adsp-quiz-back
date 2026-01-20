@@ -12,6 +12,7 @@ class SubTopic(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(nullable=False)
     description: Mapped[str | None] = mapped_column(Text, default=None)
     core_content: Mapped[str | None] = mapped_column(Text, default=None, comment="핵심 정보 텍스트")
+    source_type: Mapped[str | None] = mapped_column(default=None, comment="핵심 정보 소스 타입 (text | youtube_url)")
 
     main_topic: Mapped["MainTopic"] = relationship("MainTopic", back_populates="sub_topics")
     quizzes: Mapped[list["Quiz"]] = relationship(

@@ -42,43 +42,69 @@ async def update_sub_topic_core_content(
     request: sub_topic_schema.SubTopicCoreContentUpdateRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """세부항목 핵심 정보 업데이트 API (관리자용)"""
-    # 주요항목 존재 확인
+    """세부항목 핵심 정보 등록 API (관리자용)
+    
+    등록만 가능하며, 이미 등록된 경우 수정 불가 (409 Conflict 반환)
+    """
+    # 1. 주요항목 존재 확인
     main_topic = await main_topic_crud.get_main_topic_by_id(db, main_topic_id)
     if not main_topic:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"주요항목을 찾을 수 없습니다: {main_topic_id}",
+            detail={
+                "code": "NOT_FOUND",
+                "detail": f"주요항목을 찾을 수 없습니다: {main_topic_id}",
+            },
         )
     
-    # 세부항목 존재 확인
+    # 2. 세부항목 존재 및 관계 확인 (3단계 카테고리 검증)
     sub_topic = await sub_topic_crud.get_sub_topic_by_id(db, sub_topic_id)
     if not sub_topic:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"세부항목을 찾을 수 없습니다: {sub_topic_id}",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "INVALID_CATEGORY",
+                "detail": "선택한 과목, 주요항목, 세부항목이 일치하지 않습니다.",
+            },
         )
     
     # 세부항목이 해당 주요항목에 속하는지 확인
     if sub_topic.main_topic_id != main_topic_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"세부항목({sub_topic_id})이 주요항목({main_topic_id})에 속하지 않습니다",
+            detail={
+                "code": "INVALID_CATEGORY",
+                "detail": "선택한 과목, 주요항목, 세부항목이 일치하지 않습니다.",
+            },
         )
     
-    # 핵심 정보 업데이트
+    # 3. 중복 등록 방지 검증
+    if sub_topic.core_content is not None and sub_topic.core_content.strip():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "ALREADY_EXISTS",
+                "detail": "이미 등록된 핵심 정보입니다. 수정 및 삭제가 불가능합니다.",
+            },
+        )
+    
+    # 4. 핵심 정보 등록
     updated_sub_topic = await sub_topic_crud.update_sub_topic_core_content(
         db,
         sub_topic_id,
         request.core_content,
+        request.source_type,
     )
     
     if not updated_sub_topic:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="핵심 정보 업데이트 중 오류가 발생했습니다",
+            detail={
+                "code": "INTERNAL_SERVER_ERROR",
+                "detail": "핵심 정보 등록 중 오류가 발생했습니다",
+            },
         )
     
-    logger.info(f"세부항목 핵심 정보 업데이트: sub_topic_id={sub_topic_id}")
+    logger.info(f"세부항목 핵심 정보 등록 완료: sub_topic_id={sub_topic_id}, source_type={request.source_type}")
     
     return sub_topic_schema.SubTopicCoreContentResponse.model_validate(updated_sub_topic)

@@ -23,6 +23,7 @@ class SubTopicListResponse(BaseModel):
 class SubTopicCoreContentUpdateRequest(BaseModel):
     """세부항목 핵심 정보 업데이트 요청 스키마"""
     core_content: str = Field(..., description="핵심 정보 텍스트 (URL 또는 텍스트)")
+    source_type: str = Field(..., description="소스 타입 (text | youtube_url)")
 
 
 class SubTopicCoreContentResponse(BaseModel):
@@ -30,6 +31,7 @@ class SubTopicCoreContentResponse(BaseModel):
     id: int
     name: str
     core_content: str | None
+    source_type: str | None
     updated_at: datetime
 
     model_config = {"from_attributes": True}
