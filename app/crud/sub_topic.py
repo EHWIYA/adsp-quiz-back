@@ -25,3 +25,19 @@ async def get_sub_topics_by_main_topic_id(session: AsyncSession, main_topic_id: 
 async def get_sub_topic_with_core_content(session: AsyncSession, sub_topic_id: int) -> SubTopic | None:
     """세부항목 조회 (핵심 정보 포함)"""
     return await get_sub_topic_by_id(session, sub_topic_id)
+
+
+async def update_sub_topic_core_content(
+    session: AsyncSession,
+    sub_topic_id: int,
+    core_content: str,
+) -> SubTopic | None:
+    """세부항목 핵심 정보 업데이트"""
+    sub_topic = await get_sub_topic_by_id(session, sub_topic_id)
+    if not sub_topic:
+        return None
+    
+    sub_topic.core_content = core_content
+    await session.commit()
+    await session.refresh(sub_topic)
+    return sub_topic

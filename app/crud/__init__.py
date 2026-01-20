@@ -23,6 +23,7 @@ from app.crud.sub_topic import (
     get_sub_topic_by_id,
     get_sub_topic_with_core_content,
     get_sub_topics_by_main_topic_id,
+    update_sub_topic_core_content,
 )
 
 __all__ = [
@@ -40,6 +41,7 @@ __all__ = [
     "get_sub_topic_by_id",
     "get_sub_topic_with_core_content",
     "get_sub_topics_by_main_topic_id",
+    "update_sub_topic_core_content",
     "create_exam_record",
     "get_exam_records_by_session",
     "get_exam_record_by_session_and_quiz",

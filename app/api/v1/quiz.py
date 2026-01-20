@@ -1,4 +1,5 @@
 import logging
+import random
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,7 +8,7 @@ from app.crud import quiz as quiz_crud, sub_topic as sub_topic_crud
 from app.exceptions import GeminiServiceUnavailableError
 from app.models.base import get_db
 from app.schemas import ai, quiz as quiz_schema
-from app.services import ai_service, youtube_service
+from app.services import ai_service, quiz_variation, youtube_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/quiz", tags=["quiz"])
@@ -243,3 +244,173 @@ async def generate_study_quizzes(
         quizzes=quiz_responses,
         total_count=len(quiz_responses)
     )
+
+
+@router.get("/study/next", response_model=quiz_schema.QuizResponse)
+async def get_next_study_quiz(
+    sub_topic_id: int,
+    exclude_quiz_ids: str | None = None,  # 콤마로 구분된 문제 ID 리스트 (예: "1,2,3")
+    db: AsyncSession = Depends(get_db),
+):
+    """학습 모드 다음 문제 요청 API (점진적 생성, 1개씩, 이미 본 문제 제외)"""
+    # 세부항목 존재 확인
+    sub_topic = await sub_topic_crud.get_sub_topic_with_core_content(db, sub_topic_id)
+    if not sub_topic:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"세부항목을 찾을 수 없습니다: {sub_topic_id}",
+        )
+    
+    # 핵심 정보 확인
+    if not sub_topic.core_content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"세부항목에 핵심 정보가 없습니다: {sub_topic_id}",
+        )
+    
+    # 이미 본 문제 ID 파싱
+    exclude_ids = None
+    if exclude_quiz_ids:
+        try:
+            exclude_ids = [int(id_str.strip()) for id_str in exclude_quiz_ids.split(",") if id_str.strip()]
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="exclude_quiz_ids는 콤마로 구분된 숫자 리스트여야 합니다 (예: '1,2,3')",
+            )
+    
+    # 1. DB에서 해당 세부항목의 기존 문제 조회 (랜덤 1개, 이미 본 문제 제외)
+    existing_quizzes = await quiz_crud.get_quizzes_by_sub_topic_id(
+        db,
+        sub_topic_id,
+        1,  # 1개만 조회
+        exclude_quiz_ids=exclude_ids,
+    )
+    
+    # 2. 기존 문제가 있으면 변형하여 반환 (토큰 절약)
+    if existing_quizzes:
+        existing_quiz = existing_quizzes[0]
+        quiz_response = quiz_schema.QuizResponse.model_validate(existing_quiz)
+        
+        # 문제 변형 (선택지 순서 섞기 또는 문제 문장 변형)
+        # 70% 확률로 변형, 30% 확률로 원본 그대로
+        if random.random() < 0.7:
+            quiz_response = quiz_variation.vary_quiz(quiz_response)
+            logger.info(
+                f"기존 문제 변형하여 반환: quiz_id={existing_quiz.id}, "
+                f"sub_topic_id={sub_topic_id} (토큰 0개 사용)"
+            )
+        else:
+            logger.info(
+                f"기존 문제 그대로 반환: quiz_id={existing_quiz.id}, "
+                f"sub_topic_id={sub_topic_id} (토큰 0개 사용)"
+            )
+        
+        return quiz_response
+    
+    # 2-1. 기존 문제가 없거나 모두 본 문제인 경우
+    # DB에 문제가 충분한지 확인 (exclude_ids 제외하고)
+    total_quiz_count = await quiz_crud.get_quiz_count_by_sub_topic_id(db, sub_topic_id)
+    available_count = total_quiz_count - (len(exclude_ids) if exclude_ids else 0)
+    
+    # 사용 가능한 문제가 3개 미만이면 자동으로 새 문제 생성 (다양성 보장)
+    if available_count < 3:
+        logger.info(
+            f"사용 가능한 문제 부족 ({available_count}개 < 3개). "
+            f"새 문제 자동 생성: sub_topic_id={sub_topic_id} (토큰 1개 사용)"
+        )
+    else:
+        # 사용 가능한 문제가 있는데 조회되지 않은 경우는 없어야 하지만, 혹시 모르니 새로 생성
+        logger.warning(
+            f"사용 가능한 문제가 있지만 조회되지 않음 ({available_count}개). "
+            f"새 문제 생성: sub_topic_id={sub_topic_id} (토큰 1개 사용)"
+        )
+        existing_quiz = existing_quizzes[0]
+        quiz_response = quiz_schema.QuizResponse.model_validate(existing_quiz)
+        
+        # 문제 변형 (선택지 순서 섞기 또는 문제 문장 변형)
+        # 70% 확률로 변형, 30% 확률로 원본 그대로
+        if random.random() < 0.7:
+            quiz_response = quiz_variation.vary_quiz(quiz_response)
+            logger.info(
+                f"기존 문제 변형하여 반환: quiz_id={existing_quiz.id}, "
+                f"sub_topic_id={sub_topic_id} (토큰 0개 사용)"
+            )
+        else:
+            logger.info(
+                f"기존 문제 그대로 반환: quiz_id={existing_quiz.id}, "
+                f"sub_topic_id={sub_topic_id} (토큰 0개 사용)"
+            )
+        
+        return quiz_response
+    
+    # 3. 기존 문제가 없으면 Gemini API로 새로 생성 (토큰 1개 사용)
+    logger.info(
+        f"새 문제 생성: sub_topic_id={sub_topic_id} (토큰 1개 사용)"
+    )
+    
+    subject_id = sub_topic.main_topic.subject_id
+    
+    try:
+        # 핵심 정보를 기반으로 문제 생성
+        ai_request = ai.AIQuizGenerationRequest(
+            source_text=sub_topic.core_content,
+            subject_name=sub_topic.main_topic.subject.name,
+        )
+        
+        ai_response = await ai_service.generate_quiz(ai_request)
+        
+        # 해시 생성 (핵심 정보 기반)
+        source_hash = youtube_service.generate_hash(
+            f"{sub_topic.core_content}_{sub_topic_id}_{random.randint(1000, 9999)}"
+        )
+        
+        # 중복 확인
+        existing_quiz = await quiz_crud.get_quiz_by_hash(db, source_hash)
+        if existing_quiz:
+            # 이미 존재하는 문제는 변형하여 반환
+            quiz_response = quiz_schema.QuizResponse.model_validate(existing_quiz)
+            quiz_response = quiz_variation.vary_quiz(quiz_response)
+            logger.info(
+                f"중복 문제 변형하여 반환: quiz_id={existing_quiz.id}, "
+                f"sub_topic_id={sub_topic_id} (토큰 0개 사용)"
+            )
+            return quiz_response
+        
+        # 새 문제 생성
+        new_quiz = await quiz_crud.create_quiz(
+            db,
+            subject_id=subject_id,
+            ai_response=ai_response,
+            source_hash=source_hash,
+            source_url=None,
+            source_text=sub_topic.core_content,
+            sub_topic_id=sub_topic_id,
+        )
+        
+        quiz_response = quiz_schema.QuizResponse.model_validate(new_quiz)
+        logger.info(
+            f"새 문제 생성 완료: quiz_id={new_quiz.id}, "
+            f"sub_topic_id={sub_topic_id} (토큰 1개 사용)"
+        )
+        
+        return quiz_response
+        
+    except GeminiServiceUnavailableError as e:
+        logger.error(
+            f"Gemini API 과부하: sub_topic_id={sub_topic_id}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e),
+        )
+    except Exception as e:
+        logger.error(
+            f"문제 생성 중 오류: sub_topic_id={sub_topic_id}, "
+            f"에러={e.__class__.__name__}: {str(e)}",
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"문제 생성 중 오류가 발생했습니다: {str(e)}",
+        )

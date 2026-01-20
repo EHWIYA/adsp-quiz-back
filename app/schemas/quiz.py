@@ -96,6 +96,11 @@ class StudyModeQuizCreateRequest(BaseModel):
     quiz_count: int = Field(default=10, ge=1, le=50, description="생성할 문제 개수 (기본값: 10, 최대: 50)")
 
 
+class StudyModeNextQuizRequest(BaseModel):
+    """학습 모드 다음 문제 요청 스키마 (점진적 생성)"""
+    sub_topic_id: int = Field(..., description="세부항목 ID (필수)")
+
+
 class ExamStartRequest(BaseModel):
     """시험 시작 요청 스키마"""
     subject_id: int = Field(..., description="과목 ID")
@@ -246,3 +251,18 @@ class SubTopicListResponse(BaseModel):
     """세부항목 목록 응답 스키마"""
     sub_topics: list[SubTopicResponse]
     total: int
+
+
+class SubTopicCoreContentUpdateRequest(BaseModel):
+    """세부항목 핵심 정보 업데이트 요청 스키마"""
+    core_content: str = Field(..., description="핵심 정보 텍스트 (URL 또는 텍스트)")
+
+
+class SubTopicCoreContentResponse(BaseModel):
+    """세부항목 핵심 정보 응답 스키마"""
+    id: int
+    name: str
+    core_content: str | None
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}

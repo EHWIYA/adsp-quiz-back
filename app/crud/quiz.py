@@ -122,16 +122,18 @@ async def get_quizzes_by_sub_topic_id(
     session: AsyncSession,
     sub_topic_id: int,
     count: int,
+    exclude_quiz_ids: list[int] | None = None,
 ) -> Sequence[Quiz]:
-    """세부항목별 문제 조회 (캐시 조회용)"""
+    """세부항목별 문제 조회 (캐시 조회용, 이미 본 문제 제외 가능)"""
     from sqlalchemy import func
     
-    stmt = (
-        select(Quiz)
-        .where(Quiz.sub_topic_id == sub_topic_id)
-        .order_by(func.random())
-        .limit(count)
-    )
+    stmt = select(Quiz).where(Quiz.sub_topic_id == sub_topic_id)
+    
+    # 이미 본 문제 제외
+    if exclude_quiz_ids:
+        stmt = stmt.where(~Quiz.id.in_(exclude_quiz_ids))
+    
+    stmt = stmt.order_by(func.random()).limit(count)
     result = await session.execute(stmt)
     return result.scalars().all()
 
