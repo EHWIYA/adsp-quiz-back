@@ -17,16 +17,16 @@ if [ -f "${PROJECT_DIR}/scripts/deploy/steps/env/prepare-deploy.sh" ]; then
     "${PROJECT_DIR}/scripts/deploy/steps/env/prepare-deploy.sh" || exit 1
 fi
 
-echo "🗄️  [2/4] 데이터베이스 마이그레이션..."
-if [ -f "${PROJECT_DIR}/scripts/deploy/steps/app/run-migration.sh" ]; then
-    chmod +x "${PROJECT_DIR}/scripts/deploy/steps/app/run-migration.sh"
-    "${PROJECT_DIR}/scripts/deploy/steps/app/run-migration.sh" || exit 1
-fi
-
-echo "🚀 [3/4] 애플리케이션 빌드..."
+echo "🚀 [2/4] 애플리케이션 빌드..."
 if [ -f "${PROJECT_DIR}/scripts/deploy/steps/app/build-app.sh" ]; then
     chmod +x "${PROJECT_DIR}/scripts/deploy/steps/app/build-app.sh"
     "${PROJECT_DIR}/scripts/deploy/steps/app/build-app.sh" || exit 1
+fi
+
+echo "🗄️  [3/4] 데이터베이스 마이그레이션..."
+if [ -f "${PROJECT_DIR}/scripts/deploy/steps/app/run-migration.sh" ]; then
+    chmod +x "${PROJECT_DIR}/scripts/deploy/steps/app/run-migration.sh"
+    "${PROJECT_DIR}/scripts/deploy/steps/app/run-migration.sh" || exit 1
 fi
 
 echo "🏥 [4/4] 헬스체크..."
