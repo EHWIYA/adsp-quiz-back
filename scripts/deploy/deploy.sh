@@ -23,13 +23,21 @@ if [ -f "${PROJECT_DIR}/scripts/deploy/steps/app/build-app.sh" ]; then
     "${PROJECT_DIR}/scripts/deploy/steps/app/build-app.sh" || exit 1
 fi
 
-echo "🗄️  [3/4] 데이터베이스 마이그레이션..."
+echo "🗄️  [3/5] 데이터베이스 마이그레이션..."
 if [ -f "${PROJECT_DIR}/scripts/deploy/steps/app/run-migration.sh" ]; then
     chmod +x "${PROJECT_DIR}/scripts/deploy/steps/app/run-migration.sh"
     "${PROJECT_DIR}/scripts/deploy/steps/app/run-migration.sh" || exit 1
 fi
 
-echo "🏥 [4/4] 헬스체크..."
+echo "✅ [4/5] 초기 데이터 검증..."
+if [ -f "${PROJECT_DIR}/scripts/db/verify-initial-data.sh" ]; then
+    chmod +x "${PROJECT_DIR}/scripts/db/verify-initial-data.sh"
+    "${PROJECT_DIR}/scripts/db/verify-initial-data.sh" || exit 1
+else
+    echo "⚠️  초기 데이터 검증 스크립트를 찾을 수 없습니다."
+fi
+
+echo "🏥 [5/5] 헬스체크..."
 if [ -f "${PROJECT_DIR}/scripts/utils/health-check.sh" ]; then
     chmod +x "${PROJECT_DIR}/scripts/utils/health-check.sh"
     "${PROJECT_DIR}/scripts/utils/health-check.sh" "https://adsp-api.livbee.co.kr/health" 1 5 "$ENV_FILE" || true

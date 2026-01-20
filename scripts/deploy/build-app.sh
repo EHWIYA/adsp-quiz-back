@@ -67,3 +67,14 @@ else
     echo "⚠️  컨테이너 대기 스크립트를 찾을 수 없습니다."
     exit 1
 fi
+
+echo "데이터베이스 마이그레이션 실행 중..."
+source "$ENV_FILE"
+if [ -f "${PROJECT_DIR}/scripts/db/migration/run-migration.sh" ]; then
+    chmod +x "${PROJECT_DIR}/scripts/db/migration/run-migration.sh"
+    "${PROJECT_DIR}/scripts/db/migration/run-migration.sh" || exit 1
+else
+    echo "⚠️  마이그레이션 스크립트를 찾을 수 없습니다. 직접 실행합니다..."
+    docker-compose --env-file "$ENV_FILE" exec -T -e DATABASE_URL="$DATABASE_URL" app alembic upgrade head || exit 1
+fi
+echo "✅ 마이그레이션 완료"
