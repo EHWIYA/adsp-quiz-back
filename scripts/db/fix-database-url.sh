@@ -22,9 +22,9 @@ if [[ "$DATABASE_URL" == *"localhost"* ]]; then
     fi
     
     if docker-compose --env-file "$ENV_FILE" ps | grep -q "adsp-quiz-backend.*Up"; then
-        if [ -f "${PROJECT_DIR}/scripts/utils/remove-containers.sh" ]; then
-            chmod +x "${PROJECT_DIR}/scripts/utils/remove-containers.sh"
-            "${PROJECT_DIR}/scripts/utils/remove-containers.sh" "app"
+        if [ -f "${PROJECT_DIR}/scripts/utils/docker/remove-containers.sh" ]; then
+            chmod +x "${PROJECT_DIR}/scripts/utils/docker/remove-containers.sh"
+            "${PROJECT_DIR}/scripts/utils/docker/remove-containers.sh" "app"
         fi
         docker-compose --env-file "$ENV_FILE" up -d --no-deps app || sleep 2 && docker-compose --env-file "$ENV_FILE" up -d --no-deps app
         sleep 5
