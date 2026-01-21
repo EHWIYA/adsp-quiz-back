@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 class AIQuizOption(BaseModel):
     """AI 생성 문제 선택지 스키마"""
-    index: int = Field(..., ge=0, le=3, description="선택지 인덱스 (0-3)")
+    index: int = Field(..., ge=0, le=6, description="선택지 인덱스 (0-6)")
     text: str = Field(..., description="선택지 텍스트")
 
 
