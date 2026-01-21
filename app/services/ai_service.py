@@ -59,10 +59,7 @@ async def generate_quiz_with_gemini(request: AIQuizGenerationRequest) -> AIQuizG
     {{"index": 0, "text": "정답 선택지"}},
     {{"index": 1, "text": "오답 선택지 1"}},
     {{"index": 2, "text": "오답 선택지 2"}},
-    {{"index": 3, "text": "오답 선택지 3"}},
-    {{"index": 4, "text": "오답 선택지 4"}},
-    {{"index": 5, "text": "오답 선택지 5"}},
-    {{"index": 6, "text": "오답 선택지 6"}}
+    {{"index": 3, "text": "오답 선택지 3"}}
   ],
   "correct_answer": 0,
   "explanation": "해설"
@@ -71,10 +68,11 @@ async def generate_quiz_with_gemini(request: AIQuizGenerationRequest) -> AIQuizG
 요구사항:
 - 명확한 문제
 - 정답 1개 (index: 0)
-- 오답 6개 (index: 1-6, 매력적인 오답으로 구성)
+- 오답 3개 (index: 1-3, 매력적인 오답으로 구성)
 - 정답 인덱스는 항상 0
 - 간결한 해설
-- 오답들은 정답과 유사하지만 틀린 내용이어야 함"""
+- 오답들은 정답과 유사하지만 틀린 내용이어야 함
+- 반드시 4지선다 형식으로 생성 (총 4개 선택지)"""
 
     # 재시도 설정 (503 에러 대응 강화)
     max_retries = 5  # 재시도 횟수 증가 (3회 → 5회)
