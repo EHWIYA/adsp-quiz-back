@@ -46,11 +46,22 @@ async def generate_quiz_with_gemini(request: AIQuizGenerationRequest) -> AIQuizG
     client = get_gemini_client()
     semaphore = get_gemini_semaphore()
     
+    # 카테고리 정보 구성
+    category_info = request.subject_name
+    if request.main_topic_name:
+        category_info += f" > {request.main_topic_name}"
+    if request.sub_topic_name:
+        category_info += f" > {request.sub_topic_name}"
+    
     prompt = f"""당신은 교육용 문제 생성 전문가입니다.
 
-{request.subject_name} 과목 객관식 문제 1개를 생성하세요.
+카테고리: {category_info}
+
+위 카테고리에서 객관식 문제 1개를 생성하세요.
 
 텍스트: {request.source_text}
+
+**참고**: 위 텍스트는 기존 데이터와 새로 추가된 데이터가 종합된 내용입니다. 모든 정보를 종합하여 정교한 문제를 생성하세요.
 
 다음 JSON 형식으로 응답하세요:
 {{
@@ -72,7 +83,10 @@ async def generate_quiz_with_gemini(request: AIQuizGenerationRequest) -> AIQuizG
 - 정답 인덱스는 항상 0
 - 간결한 해설
 - 오답들은 정답과 유사하지만 틀린 내용이어야 함
-- 반드시 4지선다 형식으로 생성 (총 4개 선택지)"""
+- 반드시 4지선다 형식으로 생성 (총 4개 선택지)
+- **중요**: 생성된 문제는 반드시 위 카테고리({category_info})와 직접적으로 관련된 내용이어야 합니다
+- **중요**: 문제, 선택지, 해설 모두 카테고리 주제와 일치해야 하며, 다른 카테고리 내용이 포함되어서는 안 됩니다
+- **중요**: 제공된 텍스트가 카테고리와 관련이 없으면, 카테고리 주제에 맞는 문제를 생성하되 제공된 텍스트의 핵심 개념을 활용하세요"""
 
     # 재시도 설정 (503 에러 대응 강화)
     max_retries = 5  # 재시도 횟수 증가 (3회 → 5회)
@@ -119,7 +133,15 @@ async def generate_quiz_with_gemini(request: AIQuizGenerationRequest) -> AIQuizG
                 if attempt > 0:
                     logger.info(f"Gemini API 호출 성공 (시도 {attempt + 1}/{max_retries})")
                 
-                return AIQuizGenerationResponse(**data)
+                # 카테고리 검증 로깅
+                quiz_response = AIQuizGenerationResponse(**data)
+                logger.info(
+                    f"문제 생성 완료 - 카테고리: {category_info}, "
+                    f"문제: {quiz_response.question[:50]}..., "
+                    f"정답 인덱스: {quiz_response.correct_answer}"
+                )
+                
+                return quiz_response
                 
             except ClientError as e:
                 # 403 에러 확인 (API 키 문제)
@@ -184,3 +206,157 @@ async def generate_quiz(request: AIQuizGenerationRequest) -> AIQuizGenerationRes
     if not settings.gemini_api_key:
         raise ValueError("GEMINI_API_KEY가 설정되지 않았습니다")
     return await generate_quiz_with_gemini(request)
+
+
+async def validate_quiz_with_gemini(
+    question: str,
+    options: list[dict],
+    explanation: str,
+    category: str,
+) -> dict:
+    """Gemini를 사용하여 문제가 카테고리에 맞는지 검증"""
+    client = get_gemini_client()
+    semaphore = get_gemini_semaphore()
+    
+    options_text = "\n".join([f"{opt['index']}. {opt['text']}" for opt in options])
+    
+    prompt = f"""당신은 교육용 문제 검증 전문가입니다.
+
+카테고리: {category}
+
+다음 문제가 위 카테고리와 일치하는지 검증하세요.
+
+문제: {question}
+선택지:
+{options_text}
+해설: {explanation}
+
+다음 JSON 형식으로 응답하세요:
+{{
+  "is_valid": true,
+  "validation_score": 0.95,
+  "feedback": "검증 피드백",
+  "issues": ["발견된 문제점 1", "발견된 문제점 2"]
+}}
+
+요구사항:
+- is_valid: 카테고리와 일치하면 true, 아니면 false
+- validation_score: 0.0-1.0 사이의 점수 (1.0에 가까울수록 일치)
+- feedback: 검증 결과에 대한 상세 피드백
+- issues: 발견된 문제점 리스트 (없으면 빈 배열)"""
+
+    async with semaphore:
+        try:
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.3,
+                        response_mime_type="application/json",
+                    ),
+                )
+            )
+            
+            result = response.text.strip()
+            if result.startswith("```json"):
+                result = result[7:]
+            if result.startswith("```"):
+                result = result[3:]
+            if result.endswith("```"):
+                result = result[:-3]
+            result = result.strip()
+            
+            data = json.loads(result)
+            logger.info(f"문제 검증 완료: is_valid={data.get('is_valid')}, score={data.get('validation_score')}")
+            return data
+            
+        except Exception as e:
+            logger.error(f"문제 검증 중 오류: {e.__class__.__name__}: {str(e)}")
+            raise
+
+
+async def evaluate_correction_request_with_gemini(
+    quiz_question: str,
+    quiz_options: list[dict],
+    quiz_explanation: str,
+    category: str,
+    correction_request: str,
+    suggested_correction: str | None = None,
+) -> dict:
+    """Gemini를 사용하여 수정 요청이 타당한지 평가하고 수정된 문제 생성"""
+    client = get_gemini_client()
+    semaphore = get_gemini_semaphore()
+    
+    options_text = "\n".join([f"{opt['index']}. {opt['text']}" for opt in quiz_options])
+    suggested_text = f"\n제안된 수정 내용: {suggested_correction}" if suggested_correction else ""
+    
+    prompt = f"""당신은 교육용 문제 수정 전문가입니다.
+
+카테고리: {category}
+
+원본 문제:
+문제: {quiz_question}
+선택지:
+{options_text}
+해설: {quiz_explanation}
+
+수정 요청: {correction_request}
+{suggested_text}
+
+다음 JSON 형식으로 응답하세요:
+{{
+  "is_valid_request": true,
+  "validation_feedback": "수정 요청이 타당한지에 대한 평가",
+  "corrected_question": "수정된 문제 내용",
+  "corrected_options": [
+    {{"index": 0, "text": "수정된 정답 선택지"}},
+    {{"index": 1, "text": "수정된 오답 선택지 1"}},
+    {{"index": 2, "text": "수정된 오답 선택지 2"}},
+    {{"index": 3, "text": "수정된 오답 선택지 3"}}
+  ],
+  "correct_answer": 0,
+  "corrected_explanation": "수정된 해설"
+}}
+
+요구사항:
+- is_valid_request: 수정 요청이 타당하면 true, 아니면 false
+- validation_feedback: 수정 요청에 대한 평가 (타당한 경우 왜 타당한지, 타당하지 않은 경우 왜 타당하지 않은지)
+- 수정 요청이 타당한 경우에만 corrected_* 필드를 채우세요
+- 수정 요청이 타당하지 않은 경우 corrected_* 필드는 null로 설정하세요
+- 수정된 문제는 반드시 카테고리({category})와 일치해야 합니다
+- 4지선다 형식을 유지하세요"""
+
+    async with semaphore:
+        try:
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.7,
+                        response_mime_type="application/json",
+                    ),
+                )
+            )
+            
+            result = response.text.strip()
+            if result.startswith("```json"):
+                result = result[7:]
+            if result.startswith("```"):
+                result = result[3:]
+            if result.endswith("```"):
+                result = result[:-3]
+            result = result.strip()
+            
+            data = json.loads(result)
+            logger.info(f"수정 요청 평가 완료: is_valid_request={data.get('is_valid_request')}")
+            return data
+            
+        except Exception as e:
+            logger.error(f"수정 요청 평가 중 오류: {e.__class__.__name__}: {str(e)}")
+            raise

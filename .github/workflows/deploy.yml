@@ -38,6 +38,8 @@ jobs:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || '' }}
           GEMINI_MAX_CONCURRENT: ${{ secrets.GEMINI_MAX_CONCURRENT || '2' }}
+          AUTO_VALIDATE_QUIZ: ${{ secrets.AUTO_VALIDATE_QUIZ || 'false' }}
+          AUTO_VALIDATE_SAMPLE_RATE: ${{ secrets.AUTO_VALIDATE_SAMPLE_RATE || '0.1' }}
           SECRET_KEY: ${{ secrets.SECRET_KEY }}
           ALLOWED_ORIGINS: ${{ secrets.ALLOWED_ORIGINS }}
         run: |
@@ -49,6 +51,8 @@ jobs:
              DB_PASSWORD='${DB_PASSWORD}' \
              GEMINI_API_KEY='${GEMINI_API_KEY}' \
              GEMINI_MAX_CONCURRENT='${GEMINI_MAX_CONCURRENT}' \
+             AUTO_VALIDATE_QUIZ='${AUTO_VALIDATE_QUIZ}' \
+             AUTO_VALIDATE_SAMPLE_RATE='${AUTO_VALIDATE_SAMPLE_RATE}' \
              SECRET_KEY='${SECRET_KEY}' \
              ALLOWED_ORIGINS='${ALLOWED_ORIGINS}' \
              bash -s" < ./scripts/deploy/ssh/remote-deploy.sh

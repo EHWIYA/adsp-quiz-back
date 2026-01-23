@@ -59,12 +59,38 @@ async def update_sub_topic_core_content(
     core_content: str,
     source_type: str,
 ) -> SubTopic | None:
-    """세부항목 핵심 정보 업데이트"""
+    """세부항목 핵심 정보 업데이트 (기존 방식, 호환성 유지)"""
     sub_topic = await get_sub_topic_by_id(session, sub_topic_id)
     if not sub_topic:
         return None
     
     sub_topic.core_content = core_content
+    sub_topic.source_type = source_type
+    await session.commit()
+    await session.refresh(sub_topic)
+    return sub_topic
+
+
+async def append_sub_topic_core_content(
+    session: AsyncSession,
+    sub_topic_id: int,
+    additional_content: str,
+    source_type: str,
+) -> SubTopic | None:
+    """세부항목 핵심 정보 추가 (기존 데이터에 append, 수정/삭제 불가)"""
+    sub_topic = await get_sub_topic_by_id(session, sub_topic_id)
+    if not sub_topic:
+        return None
+    
+    # 기존 데이터가 있으면 구분자와 함께 추가, 없으면 새로 생성
+    if sub_topic.core_content and sub_topic.core_content.strip():
+        # 구분자로 추가 데이터 구분 (역순으로 최신 데이터가 위에 오도록)
+        separator = "\n\n--- 추가 데이터 ---\n\n"
+        sub_topic.core_content = f"{additional_content}{separator}{sub_topic.core_content}"
+    else:
+        sub_topic.core_content = additional_content
+    
+    # source_type은 최신 것으로 업데이트 (여러 타입이 섞일 수 있으므로)
     sub_topic.source_type = source_type
     await session.commit()
     await session.refresh(sub_topic)

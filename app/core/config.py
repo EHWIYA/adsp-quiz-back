@@ -16,6 +16,10 @@ class Settings(BaseSettings):
 
     # AI Provider (Gemini)
     gemini_api_key: str = ""
+    
+    # Gemini API 토큰 절약 설정
+    auto_validate_quiz: bool = False  # 자동 검증 활성화 여부 (기본값: 비활성화)
+    auto_validate_sample_rate: float = 0.1  # 자동 검증 샘플링 비율 (0.0-1.0, 기본값: 10%)
 
     # Security
     secret_key: str = ""

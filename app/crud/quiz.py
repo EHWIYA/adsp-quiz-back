@@ -103,3 +103,33 @@ async def get_quiz_count_by_sub_topic_id(
     count_stmt = select(func.count(Quiz.id)).where(Quiz.sub_topic_id == sub_topic_id)
     total_count = await session.scalar(count_stmt)
     return total_count or 0
+
+
+async def update_quiz(
+    session: AsyncSession,
+    quiz_id: int,
+    question: str | None = None,
+    options: str | None = None,
+    correct_answer: int | None = None,
+    explanation: str | None = None,
+    sub_topic_id: int | None = None,
+) -> Quiz | None:
+    """문제 수정"""
+    quiz = await get_quiz_by_id(session, quiz_id)
+    if not quiz:
+        return None
+    
+    if question is not None:
+        quiz.question = question
+    if options is not None:
+        quiz.options = options
+    if correct_answer is not None:
+        quiz.correct_answer = correct_answer
+    if explanation is not None:
+        quiz.explanation = explanation
+    if sub_topic_id is not None:
+        quiz.sub_topic_id = sub_topic_id
+    
+    await session.commit()
+    await session.refresh(quiz)
+    return quiz

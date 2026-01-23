@@ -67,3 +67,69 @@ async def get_next_study_quiz(
             raise InvalidQuizRequestError("exclude_quiz_ids는 콤마로 구분된 숫자 리스트여야 합니다 (예: '1,2,3')")
     
     return await quiz_service.get_next_study_quiz(db, sub_topic_id, exclude_ids)
+
+
+@router.put("/{quiz_id}", response_model=quiz_schema.QuizResponse)
+async def update_quiz(
+    quiz_id: int,
+    request: quiz_schema.QuizUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """문제 수정 API (카테고리 검증 후 수정 가능)"""
+    import json
+    
+    quiz = await quiz_crud.get_quiz_by_id(db, quiz_id)
+    if not quiz:
+        raise QuizNotFoundError(quiz_id)
+    
+    # options를 JSON 문자열로 변환
+    options_json = None
+    if request.options is not None:
+        options_json = json.dumps(
+            [{"index": opt.index, "text": opt.text} for opt in request.options],
+            ensure_ascii=False
+        )
+    
+    updated_quiz = await quiz_crud.update_quiz(
+        db,
+        quiz_id,
+        question=request.question,
+        options=options_json,
+        correct_answer=request.correct_answer,
+        explanation=request.explanation,
+        sub_topic_id=request.sub_topic_id,
+    )
+    
+    if not updated_quiz:
+        raise QuizNotFoundError(quiz_id)
+    
+    return quiz_schema.QuizResponse.model_validate(updated_quiz)
+
+
+@router.post("/{quiz_id}/validate", response_model=quiz_schema.QuizValidationResponse)
+async def validate_quiz(
+    quiz_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """문제 검증 API: Gemini로 생성된 문제가 카테고리에 맞는지 재검증"""
+    return await quiz_service.validate_quiz(db, quiz_id)
+
+
+@router.post("/{quiz_id}/correction", response_model=quiz_schema.QuizCorrectionResponse)
+async def request_quiz_correction(
+    quiz_id: int,
+    request: quiz_schema.QuizCorrectionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """문제 수정 요청 API: 사용자 피드백을 Gemini로 검증 후 수정"""
+    # URL의 quiz_id를 사용 (request의 quiz_id는 무시)
+    request.quiz_id = quiz_id
+    return await quiz_service.request_quiz_correction(db, request)
+
+
+@router.get("/dashboard", response_model=quiz_schema.QuizDashboardResponse)
+async def get_quiz_dashboard(
+    db: AsyncSession = Depends(get_db),
+):
+    """관리자 대시보드 API: 문제 목록과 카테고리 매칭 상태 시각화"""
+    return await quiz_service.get_quiz_dashboard(db)

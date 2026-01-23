@@ -35,16 +35,17 @@ async def get_sub_topics(
     )
 
 
-@router.put("/{main_topic_id}/sub-topics/{sub_topic_id}/core-content", response_model=sub_topic_schema.SubTopicCoreContentResponse)
-async def update_sub_topic_core_content(
+@router.post("/{main_topic_id}/sub-topics/{sub_topic_id}/core-content", response_model=sub_topic_schema.SubTopicCoreContentResponse)
+async def append_sub_topic_core_content(
     main_topic_id: int,
     sub_topic_id: int,
     request: sub_topic_schema.SubTopicCoreContentUpdateRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """세부항목 핵심 정보 등록 API (관리자용)
+    """세부항목 핵심 정보 추가 API (관리자용)
     
-    등록만 가능하며, 이미 등록된 경우 수정 불가 (409 Conflict 반환)
+    추가만 가능하며, 기존 데이터에 새로운 데이터를 append합니다.
+    수정 및 삭제는 불가능합니다.
     """
     # 1. 주요항목 존재 확인
     main_topic = await main_topic_crud.get_main_topic_by_id(db, main_topic_id)
@@ -78,18 +79,8 @@ async def update_sub_topic_core_content(
             },
         )
     
-    # 3. 중복 등록 방지 검증
-    if sub_topic.core_content is not None and sub_topic.core_content.strip():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "ALREADY_EXISTS",
-                "detail": "이미 등록된 핵심 정보입니다. 수정 및 삭제가 불가능합니다.",
-            },
-        )
-    
-    # 4. 핵심 정보 등록
-    updated_sub_topic = await sub_topic_crud.update_sub_topic_core_content(
+    # 3. 핵심 정보 추가 (기존 데이터에 append)
+    updated_sub_topic = await sub_topic_crud.append_sub_topic_core_content(
         db,
         sub_topic_id,
         request.core_content,
@@ -101,10 +92,10 @@ async def update_sub_topic_core_content(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "INTERNAL_SERVER_ERROR",
-                "detail": "핵심 정보 등록 중 오류가 발생했습니다",
+                "detail": "핵심 정보 추가 중 오류가 발생했습니다",
             },
         )
     
-    logger.info(f"세부항목 핵심 정보 등록 완료: sub_topic_id={sub_topic_id}, source_type={request.source_type}")
+    logger.info(f"세부항목 핵심 정보 추가 완료: sub_topic_id={sub_topic_id}, source_type={request.source_type}, 기존 데이터 존재 여부: {sub_topic.core_content is not None}")
     
     return sub_topic_schema.SubTopicCoreContentResponse.model_validate(updated_sub_topic)

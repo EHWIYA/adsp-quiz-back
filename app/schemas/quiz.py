@@ -204,3 +204,50 @@ class StudyModeQuizListResponse(BaseModel):
     total_count: int
 
 
+class QuizUpdateRequest(BaseModel):
+    """문제 수정 요청 스키마"""
+    question: str | None = Field(None, description="문제 내용")
+    options: list[QuizOptionResponse] | None = Field(None, description="선택지 리스트")
+    correct_answer: int | None = Field(None, ge=0, le=3, description="정답 인덱스 (0-3)")
+    explanation: str | None = Field(None, description="해설")
+    sub_topic_id: int | None = Field(None, description="세부항목 ID (카테고리 변경용)")
+
+
+class QuizValidationRequest(BaseModel):
+    """문제 검증 요청 스키마"""
+    quiz_id: int = Field(..., description="검증할 문제 ID")
+
+
+class QuizValidationResponse(BaseModel):
+    """문제 검증 응답 스키마"""
+    quiz_id: int
+    is_valid: bool = Field(..., description="카테고리 일치 여부")
+    category: str = Field(..., description="카테고리 정보")
+    validation_score: float = Field(..., ge=0.0, le=1.0, description="검증 점수 (0.0-1.0)")
+    feedback: str = Field(..., description="검증 피드백")
+    issues: list[str] = Field(default_factory=list, description="발견된 문제점 리스트")
+
+
+class QuizCorrectionRequest(BaseModel):
+    """문제 수정 요청 스키마 (사용자 피드백)"""
+    quiz_id: int = Field(..., description="수정 요청할 문제 ID")
+    correction_request: str = Field(..., description="수정 요청 내용 (무엇이 잘못되었는지 설명)")
+    suggested_correction: str | None = Field(None, description="제안하는 수정 내용 (선택)")
+
+
+class QuizCorrectionResponse(BaseModel):
+    """문제 수정 요청 응답 스키마"""
+    quiz_id: int
+    is_valid_request: bool = Field(..., description="수정 요청이 타당한지 여부 (Gemini 검증 결과)")
+    validation_feedback: str = Field(..., description="검증 피드백")
+    corrected_quiz: QuizResponse | None = Field(None, description="수정된 문제 (타당한 경우에만)")
+    original_quiz: QuizResponse = Field(..., description="원본 문제")
+
+
+class QuizDashboardResponse(BaseModel):
+    """관리자 대시보드 응답 스키마"""
+    total_quizzes: int
+    quizzes_by_category: dict[str, int] = Field(..., description="카테고리별 문제 개수")
+    validation_status: dict[str, int] = Field(..., description="검증 상태별 개수 (validated, pending, invalid)")
+    recent_quizzes: list[QuizResponse] = Field(..., description="최근 생성된 문제 목록")
+    quizzes_needing_validation: list[QuizResponse] = Field(..., description="검증이 필요한 문제 목록")

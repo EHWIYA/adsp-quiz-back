@@ -11,6 +11,8 @@ class AIQuizGenerationRequest(BaseModel):
     """AI 문제 생성 요청 스키마 (내부 사용)"""
     source_text: str = Field(..., description="문제 생성 소스 텍스트")
     subject_name: str = Field(..., description="과목명")
+    main_topic_name: str | None = Field(None, description="대주제명")
+    sub_topic_name: str | None = Field(None, description="세부항목명")
 
 
 class AIQuizGenerationResponse(BaseModel):
