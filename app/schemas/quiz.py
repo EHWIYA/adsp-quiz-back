@@ -118,6 +118,7 @@ class QuizResponse(BaseModel):
     explanation: str | None
     source_url: str | None
     created_at: datetime
+    validation_status: str | None = Field(None, description="검증 상태 (pending, valid, invalid)")
 
     model_config = {"from_attributes": True}
 
@@ -137,7 +138,12 @@ class QuizResponse(BaseModel):
                 "explanation": getattr(data, "explanation", None),
                 "source_url": getattr(data, "source_url", None),
                 "created_at": getattr(data, "created_at", None),
+                "validation_status": getattr(data, "validation_status", None),
             }
+            
+            # validation_status가 없으면 기본값 "pending" 설정
+            if "validation_status" not in data or data.get("validation_status") is None:
+                data["validation_status"] = "pending"
         
         # options 필드가 문자열(JSON)인 경우 리스트로 변환
         if isinstance(data, dict) and "options" in data:

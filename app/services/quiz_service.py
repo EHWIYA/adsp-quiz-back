@@ -3,7 +3,7 @@ import random
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.crud import quiz as quiz_crud, subject as subject_crud, sub_topic as sub_topic_crud
+from app.crud import quiz as quiz_crud, subject as subject_crud, sub_topic as sub_topic_crud, quiz_validation as validation_crud
 from app.exceptions import (
     GeminiServiceUnavailableError,
     InvalidQuizRequestError,
@@ -16,6 +16,58 @@ from app.schemas import ai, exam as exam_schema, quiz as quiz_schema
 from app.services import ai_service, quiz_variation, youtube_service
 
 logger = logging.getLogger(__name__)
+
+
+async def _create_quiz_response_with_status(
+    session: AsyncSession,
+    quiz,
+) -> quiz_schema.QuizResponse:
+    """Quiz 모델을 QuizResponse로 변환하며 validation_status 포함"""
+    validation_statuses = await validation_crud.get_latest_validation_statuses(session, [quiz.id])
+    validation_status = validation_statuses.get(quiz.id, "pending")
+    
+    quiz_dict = {
+        "id": quiz.id,
+        "subject_id": quiz.subject_id,
+        "question": quiz.question,
+        "options": quiz.options,
+        "correct_answer": quiz.correct_answer,
+        "explanation": quiz.explanation,
+        "source_url": quiz.source_url,
+        "created_at": quiz.created_at,
+        "validation_status": validation_status,
+    }
+    return quiz_schema.QuizResponse.model_validate(quiz_dict)
+
+
+async def _create_quiz_responses_with_status(
+    session: AsyncSession,
+    quizzes: list,
+) -> list[quiz_schema.QuizResponse]:
+    """여러 Quiz 모델을 QuizResponse 리스트로 변환하며 validation_status 포함 (일괄 조회)"""
+    if not quizzes:
+        return []
+    
+    quiz_ids = [q.id for q in quizzes]
+    validation_statuses = await validation_crud.get_latest_validation_statuses(session, quiz_ids)
+    
+    quiz_responses = []
+    for quiz in quizzes:
+        validation_status = validation_statuses.get(quiz.id, "pending")
+        quiz_dict = {
+            "id": quiz.id,
+            "subject_id": quiz.subject_id,
+            "question": quiz.question,
+            "options": quiz.options,
+            "correct_answer": quiz.correct_answer,
+            "explanation": quiz.explanation,
+            "source_url": quiz.source_url,
+            "created_at": quiz.created_at,
+            "validation_status": validation_status,
+        }
+        quiz_responses.append(quiz_schema.QuizResponse.model_validate(quiz_dict))
+    
+    return quiz_responses
 
 
 async def generate_quiz(
@@ -49,7 +101,7 @@ async def generate_quiz(
 
     existing_quiz = await quiz_crud.get_quiz_by_hash(session, source_hash)
     if existing_quiz:
-        return quiz_schema.QuizResponse.model_validate(existing_quiz)
+        return await _create_quiz_response_with_status(session, existing_quiz)
 
     ai_request = ai.AIQuizGenerationRequest(
         source_text=source_text,
@@ -70,7 +122,7 @@ async def generate_quiz(
         source_text=request.source_text if request.source_type == "text" else None,
     )
 
-    return quiz_schema.QuizResponse.model_validate(new_quiz)
+    return await _create_quiz_response_with_status(session, new_quiz)
 
 
 async def generate_study_quizzes(
@@ -221,10 +273,11 @@ async def generate_study_quizzes(
     # 캐시된 문제 + 새로 생성한 문제 합치기
     all_quizzes = list(cached_quizzes) + new_quizzes
     
-    # 요청한 개수만큼만 반환
-    quiz_responses = [
-        quiz_schema.QuizResponse.model_validate(q) for q in all_quizzes[:request.quiz_count]
-    ]
+    # 요청한 개수만큼만 반환 (validation_status 포함)
+    quiz_responses = await _create_quiz_responses_with_status(
+        session, 
+        all_quizzes[:request.quiz_count]
+    )
     
     logger.info(
         f"학습 모드 문제 생성 완료: sub_topic_id={request.sub_topic_id}, "
@@ -300,7 +353,7 @@ async def get_next_study_quiz(
             f"새 문제 생성: sub_topic_id={sub_topic_id} (토큰 1개 사용)"
         )
         existing_quiz = existing_quizzes[0]
-        quiz_response = quiz_schema.QuizResponse.model_validate(existing_quiz)
+        quiz_response = await _create_quiz_response_with_status(session, existing_quiz)
         
         # 문제 변형 (선택지 순서 섞기 또는 문제 문장 변형)
         # 70% 확률로 변형, 30% 확률로 원본 그대로
@@ -374,7 +427,7 @@ async def get_next_study_quiz(
         existing_quiz = await quiz_crud.get_quiz_by_hash(session, source_hash)
         if existing_quiz:
             # 이미 존재하는 문제는 변형하여 반환
-            quiz_response = quiz_schema.QuizResponse.model_validate(existing_quiz)
+            quiz_response = await _create_quiz_response_with_status(session, existing_quiz)
             quiz_response = quiz_variation.vary_quiz(quiz_response)
             logger.info(
                 f"중복 문제 변형하여 반환: quiz_id={existing_quiz.id}, "
@@ -393,7 +446,7 @@ async def get_next_study_quiz(
             sub_topic_id=sub_topic_id,
         )
         
-        quiz_response = quiz_schema.QuizResponse.model_validate(new_quiz)
+        quiz_response = await _create_quiz_response_with_status(session, new_quiz)
         
         # 자동 검증 결과 로깅 (검증이 수행된 경우에만)
         if settings.auto_validate_quiz and random.random() < settings.auto_validate_sample_rate:
@@ -533,10 +586,10 @@ async def request_quiz_correction(
             )
             
             if updated_quiz:
-                corrected_quiz = quiz_schema.QuizResponse.model_validate(updated_quiz)
+                corrected_quiz = await _create_quiz_response_with_status(session, updated_quiz)
                 logger.info(f"문제 수정 완료: quiz_id={request.quiz_id}, 수정 요청 타당함")
         
-        original_quiz = quiz_schema.QuizResponse.model_validate(quiz)
+        original_quiz = await _create_quiz_response_with_status(session, quiz)
         
         return quiz_schema.QuizCorrectionResponse(
             quiz_id=request.quiz_id,
@@ -584,10 +637,8 @@ async def get_quiz_dashboard(
         .order_by(Quiz.created_at.desc())
         .limit(10)
     )
-    recent_quizzes = [
-        quiz_schema.QuizResponse.model_validate(q) 
-        for q in recent_quizzes_result.scalars().all()
-    ]
+    recent_quizzes_models = recent_quizzes_result.scalars().all()
+    recent_quiz_ids = [q.id for q in recent_quizzes_models]
     
     # 검증 상태별 개수 조회
     validation_status_counts = await validation_crud.get_validation_status_counts(session)
@@ -602,12 +653,45 @@ async def get_quiz_dashboard(
             .where(Quiz.id.in_(quiz_ids_needing_validation))
             .order_by(Quiz.created_at.desc())
         )
-        quizzes_needing_validation = [
-            quiz_schema.QuizResponse.model_validate(q)
-            for q in quizzes_needing_validation_result.scalars().all()
-        ]
+        quizzes_needing_validation_models = quizzes_needing_validation_result.scalars().all()
     else:
-        quizzes_needing_validation = []
+        quizzes_needing_validation_models = []
+    
+    # 모든 quiz_id에 대한 validation_status 일괄 조회
+    all_quiz_ids = list(set(recent_quiz_ids + quiz_ids_needing_validation))
+    validation_statuses = await validation_crud.get_latest_validation_statuses(session, all_quiz_ids)
+    
+    # recent_quizzes에 validation_status 추가
+    recent_quizzes = []
+    for q in recent_quizzes_models:
+        quiz_dict = {
+            "id": q.id,
+            "subject_id": q.subject_id,
+            "question": q.question,
+            "options": q.options,
+            "correct_answer": q.correct_answer,
+            "explanation": q.explanation,
+            "source_url": q.source_url,
+            "created_at": q.created_at,
+            "validation_status": validation_statuses.get(q.id, "pending"),
+        }
+        recent_quizzes.append(quiz_schema.QuizResponse.model_validate(quiz_dict))
+    
+    # quizzes_needing_validation에 validation_status 추가
+    quizzes_needing_validation = []
+    for q in quizzes_needing_validation_models:
+        quiz_dict = {
+            "id": q.id,
+            "subject_id": q.subject_id,
+            "question": q.question,
+            "options": q.options,
+            "correct_answer": q.correct_answer,
+            "explanation": q.explanation,
+            "source_url": q.source_url,
+            "created_at": q.created_at,
+            "validation_status": validation_statuses.get(q.id, "pending"),
+        }
+        quizzes_needing_validation.append(quiz_schema.QuizResponse.model_validate(quiz_dict))
     
     return quiz_schema.QuizDashboardResponse(
         total_quizzes=total_count or 0,

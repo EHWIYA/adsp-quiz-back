@@ -86,6 +86,41 @@ async def get_quizzes_needing_validation(
     return [row[0] for row in result.all()]
 
 
+async def get_latest_validation_statuses(
+    session: AsyncSession,
+    quiz_ids: list[int],
+) -> dict[int, str]:
+    """여러 문제의 최신 검증 상태를 한 번에 조회"""
+    if not quiz_ids:
+        return {}
+    
+    latest_validation_subquery = (
+        select(
+            QuizValidation.quiz_id,
+            QuizValidation.validation_status,
+            func.row_number()
+            .over(
+                partition_by=QuizValidation.quiz_id,
+                order_by=desc(QuizValidation.validated_at)
+            )
+            .label('rn')
+        )
+        .where(QuizValidation.quiz_id.in_(quiz_ids))
+        .subquery()
+    )
+    
+    latest_status = (
+        select(
+            latest_validation_subquery.c.quiz_id,
+            latest_validation_subquery.c.validation_status
+        )
+        .where(latest_validation_subquery.c.rn == 1)
+    )
+    
+    result = await session.execute(latest_status)
+    return {row[0]: row[1] for row in result.all()}
+
+
 async def get_validation_status_counts(
     session: AsyncSession,
 ) -> dict[str, int]:

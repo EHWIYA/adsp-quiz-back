@@ -68,9 +68,26 @@ async def start_exam(
             await session.rollback()
             raise
 
-        quiz_responses = [quiz_schema.QuizResponse.model_validate(q) for q in quizzes]
-        for qr in quiz_responses:
-            qr.correct_answer = None
+        # validation_status 포함하여 QuizResponse 생성
+        from app.crud import quiz_validation as validation_crud
+        quiz_ids = [q.id for q in quizzes]
+        validation_statuses = await validation_crud.get_latest_validation_statuses(session, quiz_ids)
+        
+        quiz_responses = []
+        for q in quizzes:
+            validation_status = validation_statuses.get(q.id, "pending")
+            quiz_dict = {
+                "id": q.id,
+                "subject_id": q.subject_id,
+                "question": q.question,
+                "options": q.options,
+                "correct_answer": None,  # 시험 중에는 정답 숨김
+                "explanation": q.explanation,
+                "source_url": q.source_url,
+                "created_at": q.created_at,
+                "validation_status": validation_status,
+            }
+            quiz_responses.append(quiz_schema.QuizResponse.model_validate(quiz_dict))
 
         logger.info(f"시험 시작 성공: exam_session_id={exam_session_id}, quiz_count={len(quizzes)}")
         return quiz_schema.QuizListResponse(quizzes=quiz_responses, total=len(quiz_responses))

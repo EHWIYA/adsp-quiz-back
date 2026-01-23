@@ -20,6 +20,7 @@ from app.crud.quiz import (
 from app.crud.quiz_validation import (
     create_quiz_validation,
     get_latest_validation,
+    get_latest_validation_statuses,
     get_quizzes_needing_validation,
     get_validation_status_counts,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "update_exam_record_answer",
     "create_quiz_validation",
     "get_latest_validation",
+    "get_latest_validation_statuses",
     "get_quizzes_needing_validation",
     "get_validation_status_counts",
 ]

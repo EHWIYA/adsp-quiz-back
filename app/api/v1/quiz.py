@@ -43,11 +43,28 @@ async def get_quiz(
     db: AsyncSession = Depends(get_db),
 ):
     """문제 조회 API"""
+    from app.crud import quiz_validation as validation_crud
+    
     quiz = await quiz_crud.get_quiz_by_id(db, quiz_id)
     if not quiz:
         raise QuizNotFoundError(quiz_id)
 
-    return quiz_schema.QuizResponse.model_validate(quiz)
+    # validation_status 포함하여 반환
+    validation_statuses = await validation_crud.get_latest_validation_statuses(db, [quiz.id])
+    validation_status = validation_statuses.get(quiz.id, "pending")
+    
+    quiz_dict = {
+        "id": quiz.id,
+        "subject_id": quiz.subject_id,
+        "question": quiz.question,
+        "options": quiz.options,
+        "correct_answer": quiz.correct_answer,
+        "explanation": quiz.explanation,
+        "source_url": quiz.source_url,
+        "created_at": quiz.created_at,
+        "validation_status": validation_status,
+    }
+    return quiz_schema.QuizResponse.model_validate(quiz_dict)
 
 
 @router.post("/generate-study", response_model=quiz_schema.StudyModeQuizListResponse, status_code=status.HTTP_201_CREATED)
@@ -111,7 +128,23 @@ async def update_quiz(
     if not updated_quiz:
         raise QuizNotFoundError(quiz_id)
     
-    return quiz_schema.QuizResponse.model_validate(updated_quiz)
+    # validation_status 포함하여 반환
+    from app.crud import quiz_validation as validation_crud
+    validation_statuses = await validation_crud.get_latest_validation_statuses(db, [quiz_id])
+    validation_status = validation_statuses.get(quiz_id, "pending")
+    
+    quiz_dict = {
+        "id": updated_quiz.id,
+        "subject_id": updated_quiz.subject_id,
+        "question": updated_quiz.question,
+        "options": updated_quiz.options,
+        "correct_answer": updated_quiz.correct_answer,
+        "explanation": updated_quiz.explanation,
+        "source_url": updated_quiz.source_url,
+        "created_at": updated_quiz.created_at,
+        "validation_status": validation_status,
+    }
+    return quiz_schema.QuizResponse.model_validate(quiz_dict)
 
 
 @router.post("/{quiz_id}/validate", response_model=quiz_schema.QuizValidationResponse)
