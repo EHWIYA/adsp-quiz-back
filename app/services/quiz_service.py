@@ -121,19 +121,19 @@ async def generate_study_quizzes(
     subject_id = 1
     
     for i in range(needed_count):
-    try:
-        # 핵심 정보를 기반으로 문제 생성 (기존 데이터와 추가된 데이터 모두 종합)
-        # core_content는 이미 append 방식으로 저장되어 있으므로 모든 데이터가 포함됨
-        combined_content = sub_topic.core_content or ""
-        
-        # 여러 데이터가 구분자로 나뉘어 있을 경우, 모두 종합하여 사용
-        # 구분자로 분리된 경우 각 부분을 명확히 구분하여 프롬프트에 전달
-        ai_request = ai.AIQuizGenerationRequest(
-            source_text=combined_content,
-            subject_name=sub_topic.main_topic.subject.name,
-            main_topic_name=sub_topic.main_topic.name,
-            sub_topic_name=sub_topic.name,
-        )
+        try:
+            # 핵심 정보를 기반으로 문제 생성 (기존 데이터와 추가된 데이터 모두 종합)
+            # core_content는 이미 append 방식으로 저장되어 있으므로 모든 데이터가 포함됨
+            combined_content = sub_topic.core_content or ""
+            
+            # 여러 데이터가 구분자로 나뉘어 있을 경우, 모두 종합하여 사용
+            # 구분자로 분리된 경우 각 부분을 명확히 구분하여 프롬프트에 전달
+            ai_request = ai.AIQuizGenerationRequest(
+                source_text=combined_content,
+                subject_name=sub_topic.main_topic.subject.name,
+                main_topic_name=sub_topic.main_topic.name,
+                sub_topic_name=sub_topic.name,
+            )
             
             ai_response = await ai_service.generate_quiz(ai_request)
             
