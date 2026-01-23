@@ -174,12 +174,23 @@ async def generate_study_quizzes(
     
     for i in range(needed_count):
         try:
-            # 핵심 정보를 기반으로 문제 생성 (기존 데이터와 추가된 데이터 모두 종합)
-            # core_content는 이미 append 방식으로 저장되어 있으므로 모든 데이터가 포함됨
-            combined_content = sub_topic.core_content or ""
+            # 핵심 정보를 기반으로 문제 생성 (모든 핵심 정보 종합 활용)
+            # 구분자로 분리된 모든 핵심 정보를 조회
+            core_contents = sub_topic_crud.parse_core_contents(sub_topic.core_content, sub_topic.source_type)
             
-            # 여러 데이터가 구분자로 나뉘어 있을 경우, 모두 종합하여 사용
-            # 구분자로 분리된 경우 각 부분을 명확히 구분하여 프롬프트에 전달
+            # 모든 핵심 정보를 종합하여 문제 생성에 활용
+            if core_contents:
+                # 각 핵심 정보를 명확히 구분하여 결합
+                combined_parts = []
+                for idx, item in enumerate(core_contents, 1):
+                    source_type_label = "텍스트" if item["source_type"] == "text" else "YouTube URL"
+                    combined_parts.append(f"[핵심 정보 {idx} - {source_type_label}]\n{item['core_content']}")
+                combined_content = "\n\n".join(combined_parts)
+            else:
+                # 핵심 정보가 없는 경우 (이미 위에서 체크했지만 안전장치)
+                combined_content = sub_topic.core_content or ""
+            
+            # 모든 핵심 정보를 종합하여 문제 생성
             ai_request = ai.AIQuizGenerationRequest(
                 source_text=combined_content,
                 subject_name=sub_topic.main_topic.subject.name,
@@ -380,8 +391,23 @@ async def get_next_study_quiz(
     subject_id = 1
     
     try:
-        # 핵심 정보를 기반으로 문제 생성 (기존 데이터와 추가된 데이터 모두 종합)
-        combined_content = sub_topic.core_content or ""
+        # 핵심 정보를 기반으로 문제 생성 (모든 핵심 정보 종합 활용)
+        # 구분자로 분리된 모든 핵심 정보를 조회
+        core_contents = sub_topic_crud.parse_core_contents(sub_topic.core_content, sub_topic.source_type)
+        
+        # 모든 핵심 정보를 종합하여 문제 생성에 활용
+        if core_contents:
+            # 각 핵심 정보를 명확히 구분하여 결합
+            combined_parts = []
+            for idx, item in enumerate(core_contents, 1):
+                source_type_label = "텍스트" if item["source_type"] == "text" else "YouTube URL"
+                combined_parts.append(f"[핵심 정보 {idx} - {source_type_label}]\n{item['core_content']}")
+            combined_content = "\n\n".join(combined_parts)
+        else:
+            # 핵심 정보가 없는 경우 (이미 위에서 체크했지만 안전장치)
+            combined_content = sub_topic.core_content or ""
+        
+        # 모든 핵심 정보를 종합하여 문제 생성
         ai_request = ai.AIQuizGenerationRequest(
             source_text=combined_content,
             subject_name=sub_topic.main_topic.subject.name,

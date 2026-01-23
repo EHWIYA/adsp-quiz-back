@@ -16,10 +16,10 @@ async def get_core_content(
     sub_topic_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    """세부항목 핵심 정보 조회 API (관리 페이지용)
+    """세부항목 핵심 정보 조회 API (관리 페이지용, 목록 형식)
     
     관리 페이지에서 등록/수정을 위해 사용되므로, 세부항목이 없어도 빈 값으로 반환합니다.
-    core_content가 null이면 빈 문자열로 처리하여 등록 폼을 표시할 수 있도록 합니다.
+    핵심 정보는 구분자로 분리되어 배열로 반환됩니다.
     """
     logger.info(f"세부항목 핵심 정보 조회 시작: sub_topic_id={sub_topic_id}")
     
@@ -43,7 +43,17 @@ async def get_core_content(
             },
         )
     
-    logger.info(f"세부항목 핵심 정보 조회 완료: sub_topic_id={sub_topic_id}, name={sub_topic.name}, core_content={'있음' if sub_topic.core_content else '없음'}")
+    # 핵심 정보를 구분자로 분리하여 배열로 변환
+    core_contents = sub_topic_crud.parse_core_contents(sub_topic.core_content, sub_topic.source_type)
     
-    # 관리 페이지용: core_content가 None이어도 정상 응답 (빈 값으로 처리)
-    return sub_topic_schema.SubTopicCoreContentResponse.model_validate(sub_topic)
+    logger.info(f"세부항목 핵심 정보 조회 완료: sub_topic_id={sub_topic_id}, name={sub_topic.name}, core_contents_count={len(core_contents)}")
+    
+    # 목록 형식으로 응답 생성
+    return sub_topic_schema.SubTopicCoreContentResponse(
+        id=sub_topic.id,
+        name=sub_topic.name,
+        core_contents=[
+            sub_topic_schema.CoreContentItem(**item) for item in core_contents
+        ],
+        updated_at=sub_topic.updated_at
+    )

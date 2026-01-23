@@ -10,6 +10,31 @@ from app.models.main_topic import MainTopic
 
 logger = logging.getLogger(__name__)
 
+# 핵심 정보 구분자
+CORE_CONTENT_SEPARATOR = "\n\n--- 추가 데이터 ---\n\n"
+
+
+def parse_core_contents(core_content: str | None, source_type: str | None) -> list[dict]:
+    """핵심 정보를 구분자로 분리하여 배열로 반환"""
+    if not core_content or not core_content.strip():
+        return []
+    
+    # 구분자로 분리
+    parts = core_content.split(CORE_CONTENT_SEPARATOR)
+    
+    # 각 부분을 정리하여 반환 (앞뒤 공백 제거)
+    result = []
+    for index, part in enumerate(parts):
+        cleaned = part.strip()
+        if cleaned:
+            result.append({
+                "index": index,
+                "core_content": cleaned,
+                "source_type": source_type or "text"  # source_type이 없으면 기본값 "text"
+            })
+    
+    return result
+
 
 async def get_sub_topic_by_id(session: AsyncSession, sub_topic_id: int) -> SubTopic | None:
     """ID로 세부항목 조회"""
@@ -85,8 +110,7 @@ async def append_sub_topic_core_content(
     # 기존 데이터가 있으면 구분자와 함께 추가, 없으면 새로 생성
     if sub_topic.core_content and sub_topic.core_content.strip():
         # 구분자로 추가 데이터 구분 (역순으로 최신 데이터가 위에 오도록)
-        separator = "\n\n--- 추가 데이터 ---\n\n"
-        sub_topic.core_content = f"{additional_content}{separator}{sub_topic.core_content}"
+        sub_topic.core_content = f"{additional_content}{CORE_CONTENT_SEPARATOR}{sub_topic.core_content}"
     else:
         sub_topic.core_content = additional_content
     
