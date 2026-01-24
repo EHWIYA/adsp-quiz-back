@@ -36,6 +36,7 @@ app.include_router(subjects.router, prefix="/api/v1")
 app.include_router(main_topics.router, prefix="/api/v1")
 app.include_router(sub_topics.router, prefix="/api/v1")
 app.include_router(core_content.router, prefix="/api/v1")
+app.include_router(core_content.admin_router, prefix="/api/v1")
 app.include_router(wrong_answers.router, prefix="/api/v1")
 
 
@@ -57,6 +58,28 @@ def create_cors_response(
         response.headers["Access-Control-Allow-Methods"] = "*"
         response.headers["Access-Control-Allow-Headers"] = "*"
     return response
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """HTTPException 핸들러 (code/detail 형식 보장)"""
+    detail = exc.detail
+    if isinstance(detail, dict) and "code" in detail and "detail" in detail:
+        content = detail
+    else:
+        content = {"detail": detail}
+    logger.warning(
+        f"HTTPException 발생: status={exc.status_code}, detail={content}",
+        extra={
+            "path": request.url.path,
+            "method": request.method,
+        },
+    )
+    return create_cors_response(
+        status_code=exc.status_code,
+        content=content,
+        request=request,
+    )
 
 
 @app.exception_handler(RequestValidationError)

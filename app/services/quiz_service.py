@@ -845,7 +845,7 @@ async def get_quiz_dashboard(
     from app.models.quiz import Quiz
     from app.models.sub_topic import SubTopic
     from app.models.main_topic import MainTopic
-    from app.crud import quiz_validation as validation_crud, sub_topic as sub_topic_crud, main_topic as main_topic_crud
+    from app.crud import quiz_validation as validation_crud
     
     # 전체 문제 개수
     total_count = await session.scalar(select(func.count(Quiz.id)))
@@ -854,50 +854,60 @@ async def get_quiz_dashboard(
     quizzes_by_category = {}
     category_status = {}
     
-    # 주요항목의 subject 관계를 eager load
-    from sqlalchemy.orm import joinedload
-    all_main_topics_with_subject = await session.execute(
-        select(MainTopic)
-        .options(joinedload(MainTopic.subject))
+    sub_topics_result = await session.execute(
+        select(SubTopic)
+        .join(SubTopic.main_topic)
+        .options(joinedload(SubTopic.main_topic).joinedload(MainTopic.subject))
         .where(MainTopic.subject_id == 1)  # ADsP 전용
-        .order_by(MainTopic.id)
+        .order_by(MainTopic.id, SubTopic.id)
     )
-    main_topics_list = all_main_topics_with_subject.unique().scalars().all()
+    sub_topics = sub_topics_result.unique().scalars().all()
+    sub_topic_ids = [sub_topic.id for sub_topic in sub_topics]
     
-    for main_topic in main_topics_list:
-        subject_name = main_topic.subject.name if main_topic.subject else "ADsP"
+    quiz_counts = {}
+    latest_quiz_times = {}
+    if sub_topic_ids:
+        quiz_counts_result = await session.execute(
+            select(Quiz.sub_topic_id, func.count(Quiz.id))
+            .where(Quiz.sub_topic_id.in_(sub_topic_ids))
+            .group_by(Quiz.sub_topic_id)
+        )
+        quiz_counts = {row[0]: row[1] for row in quiz_counts_result.all()}
         
-        sub_topics = await sub_topic_crud.get_sub_topics_by_main_topic_id(session, main_topic.id)
-        for sub_topic in sub_topics:
-            category = f"{subject_name} > {main_topic.name} > {sub_topic.name}"
-            
-            # 문제 개수 조회
-            quiz_count = await quiz_crud.get_quiz_count_by_sub_topic_id(session, sub_topic.id)
-            quizzes_by_category[category] = quiz_count
-            
-            # 카테고리 상태 판단
-            status = "normal"
-            if quiz_count < 10:
-                status = "insufficient"  # 부족 (10개 미만)
-            else:
-                # 가장 최근 문제와 핵심 정보 업데이트 시점 비교
-                latest_quiz = await quiz_crud.get_latest_quiz_by_sub_topic_id(session, sub_topic.id)
-                if latest_quiz and sub_topic.updated_at and latest_quiz.created_at:
-                    # 핵심 정보가 변경되지 않았고 문제가 충분하면 생산 어려움 가능성
-                    # (재시도 초과로 생산 중단된 경우)
-                    if sub_topic.updated_at <= latest_quiz.created_at:
-                        # 핵심 정보가 오래 안 바뀌고 문제도 오래 안 생성되면 생산 어려움 가능성
-                        # 하지만 정확한 감지는 어려우므로 일단 normal로 처리
-                        # (향후 로그 분석 또는 플래그 추가로 개선 가능)
-                        status = "normal"
-                    else:
-                        # 핵심 정보가 최근에 변경되었으면 정상
-                        status = "normal"
-                else:
-                    # 문제가 없거나 정보가 부족하면 정상으로 간주
+        latest_quiz_times_result = await session.execute(
+            select(Quiz.sub_topic_id, func.max(Quiz.created_at))
+            .where(Quiz.sub_topic_id.in_(sub_topic_ids))
+            .group_by(Quiz.sub_topic_id)
+        )
+        latest_quiz_times = {row[0]: row[1] for row in latest_quiz_times_result.all()}
+    
+    for sub_topic in sub_topics:
+        subject_name = (
+            sub_topic.main_topic.subject.name
+            if sub_topic.main_topic and sub_topic.main_topic.subject
+            else "ADsP"
+        )
+        main_topic_name = sub_topic.main_topic.name if sub_topic.main_topic else "알 수 없음"
+        category = f"{subject_name} > {main_topic_name} > {sub_topic.name}"
+        
+        quiz_count = quiz_counts.get(sub_topic.id, 0)
+        quizzes_by_category[category] = quiz_count
+        
+        # 카테고리 상태 판단
+        status = "normal"
+        if quiz_count < 10:
+            status = "insufficient"  # 부족 (10개 미만)
+        else:
+            latest_created_at = latest_quiz_times.get(sub_topic.id)
+            if latest_created_at and sub_topic.updated_at:
+                if sub_topic.updated_at <= latest_created_at:
                     status = "normal"
-            
-            category_status[category] = status
+                else:
+                    status = "normal"
+            else:
+                status = "normal"
+        
+        category_status[category] = status
     
     # 최근 생성된 문제 (최대 10개)
     recent_quizzes_result = await session.execute(

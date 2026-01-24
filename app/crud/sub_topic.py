@@ -75,6 +75,18 @@ async def get_sub_topics_by_main_topic_id(session: AsyncSession, main_topic_id: 
     return result.scalars().all()
 
 
+async def get_sub_topics_with_relations(session: AsyncSession) -> Sequence[SubTopic]:
+    """모든 세부항목 조회 (관계 포함, ADsP 전용)"""
+    result = await session.execute(
+        select(SubTopic)
+        .join(SubTopic.main_topic)
+        .options(joinedload(SubTopic.main_topic).joinedload(MainTopic.subject))
+        .where(MainTopic.subject_id == 1)
+        .order_by(MainTopic.id, SubTopic.id)
+    )
+    return result.unique().scalars().all()
+
+
 async def get_sub_topic_with_core_content(session: AsyncSession, sub_topic_id: int) -> SubTopic | None:
     """세부항목 조회 (핵심 정보 및 관계 포함)"""
     logger.debug(f"세부항목 조회: sub_topic_id={sub_topic_id}")
