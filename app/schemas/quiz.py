@@ -227,9 +227,14 @@ class QuizValidationRequest(BaseModel):
 class QuizValidationResponse(BaseModel):
     """문제 검증 응답 스키마"""
     quiz_id: int
-    is_valid: bool = Field(..., description="카테고리 일치 여부")
+    is_valid: bool = Field(..., description="카테고리 일치 여부 (true: 0.7 이상, false: 0.7 미만)")
     category: str = Field(..., description="카테고리 정보")
-    validation_score: float = Field(..., ge=0.0, le=1.0, description="검증 점수 (0.0-1.0)")
+    validation_score: float = Field(
+        ..., 
+        ge=0.0, 
+        le=1.0, 
+        description="검증 점수 (0.0-1.0). 0.7 이상이면 is_valid=true, 미만이면 false. 백분율 표시 시 *100 필요"
+    )
     feedback: str = Field(..., description="검증 피드백")
     issues: list[str] = Field(default_factory=list, description="발견된 문제점 리스트")
 
@@ -254,6 +259,7 @@ class QuizDashboardResponse(BaseModel):
     """관리자 대시보드 응답 스키마"""
     total_quizzes: int
     quizzes_by_category: dict[str, int] = Field(..., description="카테고리별 문제 개수")
+    category_status: dict[str, str] = Field(..., description="카테고리별 상태 (normal: 정상, insufficient: 부족, production_difficult: 생산 어려움)")
     validation_status: dict[str, int] = Field(..., description="검증 상태별 개수 (valid, pending, invalid)")
     recent_quizzes: list[QuizResponse] = Field(..., description="최근 생성된 문제 목록")
     quizzes_needing_validation: list[QuizResponse] = Field(..., description="검증이 필요한 문제 목록")

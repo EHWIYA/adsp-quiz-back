@@ -9,6 +9,7 @@ from app.models.quiz import Quiz
 from app.models.sub_topic import SubTopic
 from app.models.main_topic import MainTopic
 from app.schemas.ai import AIQuizGenerationResponse
+from app.utils.similarity import calculate_question_similarity
 
 
 async def get_quiz_by_id(
@@ -126,8 +127,27 @@ async def get_quiz_count_by_sub_topic_id(
     return total_count or 0
 
 
+async def get_latest_quiz_by_sub_topic_id(
+    session: AsyncSession,
+    sub_topic_id: int,
+) -> Quiz | None:
+    """세부항목별 가장 최근 문제 조회"""
+    stmt = (
+        select(Quiz)
+        .where(Quiz.sub_topic_id == sub_topic_id)
+        .order_by(Quiz.created_at.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 def _calculate_question_similarity(q1: str, q2: str) -> float:
-    """문제 텍스트 유사도 계산 (토큰 없이, Jaccard 유사도 사용)
+    """문제 텍스트 유사도 계산 (토큰 없이, 정교한 방식)
+    
+    한국어 특성을 고려한 다중 유사도 지표 조합:
+    - 정규화된 단어 Jaccard 유사도 (조사/어미 제거, 유사 표현 정규화)
+    - 문자 n-gram 유사도 (2-gram, 3-gram)
     
     Args:
         q1: 첫 번째 문제 텍스트
@@ -136,18 +156,7 @@ def _calculate_question_similarity(q1: str, q2: str) -> float:
     Returns:
         0.0 ~ 1.0 사이의 유사도 (1.0이 완전 동일)
     """
-    # 공백 제거 및 소문자 변환 (한글은 변환 불필요)
-    words1 = set(q1.replace("?", "").replace(".", "").split())
-    words2 = set(q2.replace("?", "").replace(".", "").split())
-    
-    if not words1 or not words2:
-        return 0.0
-    
-    # Jaccard 유사도: 교집합 / 합집합
-    intersection = words1 & words2
-    union = words1 | words2
-    
-    return len(intersection) / len(union) if union else 0.0
+    return calculate_question_similarity(q1, q2)
 
 
 async def get_similar_quizzes_by_question(

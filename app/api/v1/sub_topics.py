@@ -98,4 +98,15 @@ async def append_sub_topic_core_content(
     
     logger.info(f"세부항목 핵심 정보 추가 완료: sub_topic_id={sub_topic_id}, source_type={request.source_type}, 기존 데이터 존재 여부: {sub_topic.core_content is not None}")
     
-    return sub_topic_schema.SubTopicCoreContentResponse.model_validate(updated_sub_topic)
+    # 핵심 정보를 구분자로 분리하여 배열로 변환
+    core_contents = sub_topic_crud.parse_core_contents(updated_sub_topic.core_content, updated_sub_topic.source_type)
+    
+    # 목록 형식으로 응답 생성
+    return sub_topic_schema.SubTopicCoreContentResponse(
+        id=updated_sub_topic.id,
+        name=updated_sub_topic.name,
+        core_contents=[
+            sub_topic_schema.CoreContentItem(**item) for item in core_contents
+        ],
+        updated_at=updated_sub_topic.updated_at
+    )

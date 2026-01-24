@@ -1,4 +1,6 @@
+import json
 import logging
+import re
 from typing import Sequence
 
 from sqlalchemy import select
@@ -12,25 +14,46 @@ logger = logging.getLogger(__name__)
 
 # 핵심 정보 구분자
 CORE_CONTENT_SEPARATOR = "\n\n--- 추가 데이터 ---\n\n"
+# 메타데이터 패턴: [source_type:text] 형식
+METADATA_PATTERN = re.compile(r'^\[source_type:([^\]]+)\]\s*(.*)$', re.DOTALL)
 
 
 def parse_core_contents(core_content: str | None, source_type: str | None) -> list[dict]:
-    """핵심 정보를 구분자로 분리하여 배열로 반환"""
+    """핵심 정보를 구분자로 분리하여 배열로 반환
+    
+    각 핵심 정보는 다음 형식 중 하나를 지원:
+    1. 새 형식: [source_type:text]content (권장)
+    2. 기존 형식: content (하위 호환성, 전체 source_type 사용)
+    """
     if not core_content or not core_content.strip():
         return []
     
     # 구분자로 분리
     parts = core_content.split(CORE_CONTENT_SEPARATOR)
     
-    # 각 부분을 정리하여 반환 (앞뒤 공백 제거)
     result = []
     for index, part in enumerate(parts):
         cleaned = part.strip()
-        if cleaned:
+        if not cleaned:
+            continue
+        
+        # 메타데이터 패턴 확인 (새 형식)
+        match = METADATA_PATTERN.match(cleaned)
+        if match:
+            # 새 형식: [source_type:text]content
+            item_source_type = match.group(1)
+            item_content = match.group(2).strip()
+            result.append({
+                "index": index,
+                "core_content": item_content,
+                "source_type": item_source_type
+            })
+        else:
+            # 기존 형식: content (하위 호환성)
             result.append({
                 "index": index,
                 "core_content": cleaned,
-                "source_type": source_type or "text"  # source_type이 없으면 기본값 "text"
+                "source_type": source_type or "text"
             })
     
     return result
@@ -102,19 +125,44 @@ async def append_sub_topic_core_content(
     additional_content: str,
     source_type: str,
 ) -> SubTopic | None:
-    """세부항목 핵심 정보 추가 (기존 데이터에 append, 수정/삭제 불가)"""
+    """세부항목 핵심 정보 추가 (기존 데이터에 append, 수정/삭제 불가)
+    
+    각 핵심 정보의 source_type을 개별적으로 저장하기 위해 [source_type:xxx] 형식으로 저장합니다.
+    기존 데이터와의 호환성을 위해 기존 형식도 지원합니다.
+    """
     sub_topic = await get_sub_topic_by_id(session, sub_topic_id)
     if not sub_topic:
         return None
     
+    # 새로운 핵심 정보를 메타데이터 포함 형식으로 구성
+    new_item = f"[source_type:{source_type}]{additional_content}"
+    
     # 기존 데이터가 있으면 구분자와 함께 추가, 없으면 새로 생성
     if sub_topic.core_content and sub_topic.core_content.strip():
-        # 구분자로 추가 데이터 구분 (역순으로 최신 데이터가 위에 오도록)
-        sub_topic.core_content = f"{additional_content}{CORE_CONTENT_SEPARATOR}{sub_topic.core_content}"
+        # 기존 데이터가 새 형식인지 확인
+        existing_parts = sub_topic.core_content.split(CORE_CONTENT_SEPARATOR)
+        if existing_parts and METADATA_PATTERN.match(existing_parts[0].strip()):
+            # 새 형식: 그대로 추가
+            sub_topic.core_content = f"{new_item}{CORE_CONTENT_SEPARATOR}{sub_topic.core_content}"
+        else:
+            # 기존 형식: 첫 번째 항목을 새 형식으로 변환
+            converted_parts = []
+            for part in existing_parts:
+                cleaned = part.strip()
+                if cleaned:
+                    # 기존 형식이면 메타데이터 추가
+                    if not METADATA_PATTERN.match(cleaned):
+                        converted_parts.append(f"[source_type:{sub_topic.source_type or 'text'}]{cleaned}")
+                    else:
+                        converted_parts.append(cleaned)
+            
+            # 새로운 항목 추가
+            sub_topic.core_content = f"{new_item}{CORE_CONTENT_SEPARATOR}{CORE_CONTENT_SEPARATOR.join(converted_parts)}"
     else:
-        sub_topic.core_content = additional_content
+        # 첫 번째 핵심 정보는 메타데이터 포함 형식으로 저장
+        sub_topic.core_content = new_item
     
-    # source_type은 최신 것으로 업데이트 (여러 타입이 섞일 수 있으므로)
+    # source_type은 최신 것으로 업데이트 (하위 호환성 유지)
     sub_topic.source_type = source_type
     await session.commit()
     await session.refresh(sub_topic)

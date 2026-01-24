@@ -14,6 +14,7 @@ from app.crud.quiz import (
     get_quiz_by_hash,
     get_quiz_by_id,
     get_quiz_count_by_sub_topic_id,
+    get_latest_quiz_by_sub_topic_id,
     get_quizzes_by_sub_topic_id,
     get_random_quizzes,
 )
@@ -43,6 +44,7 @@ __all__ = [
     "get_random_quizzes",
     "get_quizzes_by_sub_topic_id",
     "get_quiz_count_by_sub_topic_id",
+    "get_latest_quiz_by_sub_topic_id",
     "get_subject_by_id",
     "get_all_subjects",
     "get_all_subjects_with_quiz_count",

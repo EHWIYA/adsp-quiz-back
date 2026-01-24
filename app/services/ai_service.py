@@ -239,11 +239,32 @@ async def validate_quiz_with_gemini(
   "issues": ["발견된 문제점 1", "발견된 문제점 2"]
 }}
 
+**중요: 점수 계산 기준**
+- validation_score는 0.0-1.0 사이의 점수입니다
+- 점수는 카테고리 일치도, 문제 품질, 선택지 적합성, 해설 명확성을 종합적으로 평가합니다
+- **점수 범위별 의미:**
+  * 0.9-1.0: 매우 우수 (카테고리 완벽 일치, 문제 품질 매우 높음)
+  * 0.8-0.89: 우수 (카테고리 일치, 문제 품질 높음)
+  * 0.7-0.79: 양호 (카테고리 일치, 일부 개선 여지 있음)
+  * 0.6-0.69: 보통 (카테고리 대체로 일치, 개선 필요)
+  * 0.5-0.59: 미흡 (카테고리와 부분 일치, 수정 권장)
+  * 0.0-0.49: 부적합 (카테고리 불일치 또는 심각한 문제)
+
+**is_valid와 validation_score의 관계:**
+- is_valid=true인 경우: validation_score는 반드시 0.7 이상이어야 합니다
+- is_valid=false인 경우: validation_score는 0.7 미만입니다
+- **일관성 필수**: is_valid와 validation_score는 반드시 일치해야 합니다
+
 요구사항:
-- is_valid: 카테고리와 일치하면 true, 아니면 false
-- validation_score: 0.0-1.0 사이의 점수 (1.0에 가까울수록 일치)
-- feedback: 검증 결과에 대한 상세 피드백
-- issues: 발견된 문제점 리스트 (없으면 빈 배열)"""
+- is_valid: 카테고리와 일치하고 문제 품질이 양호하면 true, 아니면 false
+- validation_score: 위 기준에 따라 정확히 계산 (0.0-1.0)
+- feedback: 검증 결과에 대한 상세 피드백 (점수 근거 포함)
+- issues: 발견된 문제점 리스트 (없으면 빈 배열)
+
+**예시:**
+- 문제가 카테고리와 완벽히 일치하고 품질이 우수한 경우: {{"is_valid": true, "validation_score": 0.95}}
+- 문제가 카테고리와 일치하지만 일부 개선이 필요한 경우: {{"is_valid": true, "validation_score": 0.75}}
+- 문제가 카테고리와 불일치하거나 심각한 문제가 있는 경우: {{"is_valid": false, "validation_score": 0.3}}"""
 
     async with semaphore:
         try:

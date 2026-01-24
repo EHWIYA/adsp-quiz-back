@@ -107,8 +107,11 @@ async def test_post_core_content_success(client, test_db_session):
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == 1
-    assert "core_content" in data
-    assert data["source_type"] == "text"
+    assert "core_contents" in data
+    assert isinstance(data["core_contents"], list)
+    assert len(data["core_contents"]) == 1
+    assert data["core_contents"][0]["core_content"] == "테스트 핵심 정보 내용"
+    assert data["core_contents"][0]["source_type"] == "text"
     assert "updated_at" in data
 
 
@@ -141,9 +144,17 @@ async def test_post_core_content_multiple(client, test_db_session):
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == 1
-    assert "두 번째 내용" in data["core_content"]
-    assert "첫 번째 내용" in data["core_content"]
-    assert data["source_type"] == "text"
+    assert "core_contents" in data
+    assert isinstance(data["core_contents"], list)
+    assert len(data["core_contents"]) == 2
+    
+    # 핵심 정보 내용 확인
+    core_content_texts = [item["core_content"] for item in data["core_contents"]]
+    assert "두 번째 내용" in core_content_texts
+    assert "첫 번째 내용" in core_content_texts
+    
+    # source_type 확인
+    assert all(item["source_type"] == "text" for item in data["core_contents"])
 
 
 @pytest.mark.asyncio

@@ -14,8 +14,13 @@ from app.exceptions import (
 from app.core.config import settings
 from app.schemas import ai, exam as exam_schema, quiz as quiz_schema
 from app.services import ai_service, quiz_variation, youtube_service
+from app.utils.similarity import calculate_question_similarity
 
 logger = logging.getLogger(__name__)
+
+# 검증 점수 기준점 (0.7 = 70점)
+# 이 값 이상이면 is_valid=true, 미만이면 false
+VALIDATION_SCORE_THRESHOLD = 0.7
 
 
 async def _create_quiz_response_with_status(
@@ -129,7 +134,11 @@ async def generate_study_quizzes(
     session: AsyncSession,
     request: quiz_schema.StudyModeQuizCreateRequest,
 ) -> quiz_schema.StudyModeQuizListResponse:
-    """학습 모드 문제 생성 (10개 일괄 생성, 캐싱 지원, 적정선 기준, 변형 적용, ADsP 전용)"""
+    """학습 모드 문제 생성 (10개 일괄 생성, 캐싱 지원, 적정선 기준, 변형 적용, ADsP 전용)
+    
+    재시도 초과 시 새 문제 생성을 중단하고 캐시된 문제만 제공합니다.
+    핵심 정보가 변경된 경우에만 새 문제 생성을 재시도합니다.
+    """
     # 세부항목 존재 확인
     sub_topic = await sub_topic_crud.get_sub_topic_with_core_content(session, request.sub_topic_id)
     if not sub_topic:
@@ -138,6 +147,17 @@ async def generate_study_quizzes(
     # 핵심 정보 확인
     if not sub_topic.core_content:
         raise InvalidQuizRequestError(f"세부항목에 핵심 정보가 없습니다: {request.sub_topic_id}")
+    
+    # 핵심 정보 변경 감지: 가장 최근 문제 생성 시점과 비교
+    latest_quiz = await quiz_crud.get_latest_quiz_by_sub_topic_id(session, request.sub_topic_id)
+    core_content_updated = False
+    if latest_quiz:
+        # 세부항목의 updated_at이 가장 최근 문제의 created_at보다 늦으면 핵심 정보 변경
+        if sub_topic.updated_at and latest_quiz.created_at:
+            core_content_updated = sub_topic.updated_at > latest_quiz.created_at
+    else:
+        # 문제가 없으면 핵심 정보가 새로 추가된 것으로 간주
+        core_content_updated = True
     
     # 세부항목별 전체 문제 개수 확인 (적정선 기준 판단용)
     total_cached_count = await quiz_crud.get_quiz_count_by_sub_topic_id(
@@ -216,133 +236,184 @@ async def generate_study_quizzes(
     
     # 부족한 문제 개수 계산
     needed_count = new_count
+    
+    # 핵심 정보가 변경되지 않았고 문제가 충분하면 새 문제 생성 안 함
+    if needed_count > 0 and not core_content_updated and total_cached_count >= 10:
+        logger.info(
+            f"핵심 정보 변경 없음, 새 문제 생성 중단: sub_topic_id={request.sub_topic_id}, "
+            f"캐시={total_cached_count}개, 핵심 정보 변경={core_content_updated}"
+        )
+        needed_count = 0
+    
     if needed_count > 0:
         logger.info(
             f"새 문제 생성 필요: sub_topic_id={request.sub_topic_id}, "
-            f"요청={request.quiz_count}, 캐시={actual_cached_count}, 생성={needed_count}"
+            f"요청={request.quiz_count}, 캐시={actual_cached_count}, 생성={needed_count}, "
+            f"핵심 정보 변경={core_content_updated}"
         )
     
     # 새 문제 생성
     new_quizzes = []
+    # 유사 문제로 판단되어 변형이 필요한 문제 ID 목록
+    similar_quiz_ids_to_vary = set()
     # ADsP 전용 구조: subject_id는 항상 1
     subject_id = 1
+    # 유사도 재시도 제한 (문제당 최대 3회)
+    MAX_SIMILARITY_RETRIES = 3
+    # 문제 생산 중단 여부 (재시도 초과 시)
+    production_stopped = False
     
     for i in range(needed_count):
-        try:
-            # 핵심 정보를 기반으로 문제 생성 (모든 핵심 정보 종합 활용)
-            # 구분자로 분리된 모든 핵심 정보를 조회
-            core_contents = sub_topic_crud.parse_core_contents(sub_topic.core_content, sub_topic.source_type)
-            
-            # 모든 핵심 정보를 종합하여 문제 생성에 활용
-            if core_contents:
-                # 각 핵심 정보를 명확히 구분하여 결합
-                combined_parts = []
-                for idx, item in enumerate(core_contents, 1):
-                    source_type_label = "텍스트" if item["source_type"] == "text" else "YouTube URL"
-                    combined_parts.append(f"[핵심 정보 {idx} - {source_type_label}]\n{item['core_content']}")
-                combined_content = "\n\n".join(combined_parts)
-            else:
-                # 핵심 정보가 없는 경우 (이미 위에서 체크했지만 안전장치)
-                combined_content = sub_topic.core_content or ""
-            
-            # 모든 핵심 정보를 종합하여 문제 생성
-            ai_request = ai.AIQuizGenerationRequest(
-                source_text=combined_content,
-                subject_name=sub_topic.main_topic.subject.name,
-                main_topic_name=sub_topic.main_topic.name,
-                sub_topic_name=sub_topic.name,
-            )
-            
-            ai_response = await ai_service.generate_quiz(ai_request)
-            
-            # 유사 문제 체크 (토큰 없이)
-            similar_quizzes = await quiz_crud.get_similar_quizzes_by_question(
-                session,
-                request.sub_topic_id,
-                ai_response.question,
-                similarity_threshold=0.7,
-                limit=5
-            )
-            if similar_quizzes:
-                logger.info(
-                    f"유사 문제 발견으로 스킵: sub_topic_id={request.sub_topic_id}, "
-                    f"유사 문제 개수={len(similar_quizzes)}, "
-                    f"문제={ai_response.question[:50]}..."
-                )
-                # 유사 문제가 있으면 다시 생성 시도 (최대 3회)
-                if i < needed_count - 1:
-                    continue
+        retry_count = 0
+        quiz_created = False
+        
+        while not quiz_created and retry_count <= MAX_SIMILARITY_RETRIES:
+            try:
+                # 핵심 정보를 기반으로 문제 생성 (모든 핵심 정보 종합 활용)
+                # 구분자로 분리된 모든 핵심 정보를 조회
+                core_contents = sub_topic_crud.parse_core_contents(sub_topic.core_content, sub_topic.source_type)
+                
+                # 모든 핵심 정보를 종합하여 문제 생성에 활용
+                if core_contents:
+                    # 각 핵심 정보를 명확히 구분하여 결합
+                    combined_parts = []
+                    for idx, item in enumerate(core_contents, 1):
+                        source_type_label = "텍스트" if item["source_type"] == "text" else "YouTube URL"
+                        combined_parts.append(f"[핵심 정보 {idx} - {source_type_label}]\n{item['core_content']}")
+                    combined_content = "\n\n".join(combined_parts)
                 else:
-                    # 마지막 시도면 유사 문제 중 하나를 변형하여 사용
-                    similar_quiz = similar_quizzes[0]
-                    quiz_response = quiz_schema.QuizResponse.model_validate(similar_quiz)
-                    quiz_response = quiz_variation.vary_quiz(quiz_response)
-                    new_quizzes.append(similar_quiz)
+                    # 핵심 정보가 없는 경우 (이미 위에서 체크했지만 안전장치)
+                    combined_content = sub_topic.core_content or ""
+                
+                # 모든 핵심 정보를 종합하여 문제 생성
+                ai_request = ai.AIQuizGenerationRequest(
+                    source_text=combined_content,
+                    subject_name=sub_topic.main_topic.subject.name,
+                    main_topic_name=sub_topic.main_topic.name,
+                    sub_topic_name=sub_topic.name,
+                )
+                
+                ai_response = await ai_service.generate_quiz(ai_request)
+                
+                # 유사 문제 체크 (토큰 없이)
+                similar_quizzes = await quiz_crud.get_similar_quizzes_by_question(
+                    session,
+                    request.sub_topic_id,
+                    ai_response.question,
+                    similarity_threshold=0.7,
+                    limit=5
+                )
+                
+                if similar_quizzes:
+                    retry_count += 1
                     logger.info(
-                        f"유사 문제 변형하여 사용: quiz_id={similar_quiz.id}, "
-                        f"sub_topic_id={request.sub_topic_id}"
+                        f"유사 문제 발견 (재시도 {retry_count}/{MAX_SIMILARITY_RETRIES}): "
+                        f"sub_topic_id={request.sub_topic_id}, "
+                        f"유사 문제 개수={len(similar_quizzes)}, "
+                        f"문제={ai_response.question[:50]}..."
                     )
-                    continue
-            
-            # 자동 검증: 선택적 + 샘플링 (토큰 절약)
-            if settings.auto_validate_quiz and random.random() < settings.auto_validate_sample_rate:
-                try:
-                    category = f"{sub_topic.main_topic.subject.name} > {sub_topic.main_topic.name} > {sub_topic.name}"
-                    import json
-                    options = json.loads(ai_response.options_json) if isinstance(ai_response.options_json, str) else [{"index": opt.index, "text": opt.text} for opt in ai_response.options]
                     
-                    # 간단한 키워드 기반 사전 필터링 (토큰 없이)
-                    if _simple_keyword_check(ai_response.question, category):
-                        validation_result = await ai_service.validate_quiz_with_gemini(
-                            question=ai_response.question,
-                            options=options,
-                            explanation=ai_response.explanation,
-                            category=category,
-                        )
-                        
-                        if not validation_result.get("is_valid", False) or validation_result.get("validation_score", 0.0) < 0.7:
+                    # 재시도 횟수 초과 시 처리
+                    if retry_count > MAX_SIMILARITY_RETRIES:
+                        # 핵심 정보가 변경되지 않았으면 새 문제 생성을 중단하고 캐시만 사용
+                        if not core_content_updated:
                             logger.warning(
-                                f"자동 검증 실패: sub_topic_id={request.sub_topic_id}, "
-                                f"score={validation_result.get('validation_score', 0.0)}, "
-                                f"issues={validation_result.get('issues', [])}"
+                                f"유사도 재시도 횟수 초과, 문제 생산 중단: "
+                                f"sub_topic_id={request.sub_topic_id}, "
+                                f"재시도 횟수={retry_count}, "
+                                f"핵심 정보 변경 없음 → 캐시 문제만 사용"
                             )
-                except Exception as e:
-                    # 검증 실패해도 문제 생성은 계속 진행
-                    logger.warning(f"자동 검증 중 오류 (문제 생성은 계속 진행): {e.__class__.__name__}: {str(e)}")
+                            production_stopped = True
+                            quiz_created = True  # 새 문제 생성 중단
+                            break  # while 루프 종료
+                        else:
+                            # 핵심 정보가 변경되었으면 유사 문제 변형하여 사용
+                            similar_quiz = similar_quizzes[0]
+                            new_quizzes.append(similar_quiz)
+                            similar_quiz_ids_to_vary.add(similar_quiz.id)
+                            quiz_created = True
+                            logger.warning(
+                                f"유사도 재시도 횟수 초과, 핵심 정보 변경 감지로 변형 사용: "
+                                f"quiz_id={similar_quiz.id}, "
+                                f"sub_topic_id={request.sub_topic_id}, "
+                                f"재시도 횟수={retry_count} "
+                                f"(나중에 변형 적용 단계에서 100% 확률로 변형)"
+                            )
+                    # 재시도 가능하면 continue
+                    continue
+                
+                # 유사 문제가 없으면 정상 진행
+                quiz_created = True
+                
+                # 자동 검증: 선택적 + 샘플링 (토큰 절약)
+                if settings.auto_validate_quiz and random.random() < settings.auto_validate_sample_rate:
+                    try:
+                        category = f"{sub_topic.main_topic.subject.name} > {sub_topic.main_topic.name} > {sub_topic.name}"
+                        import json
+                        options = json.loads(ai_response.options_json) if isinstance(ai_response.options_json, str) else [{"index": opt.index, "text": opt.text} for opt in ai_response.options]
+                        
+                        # 간단한 키워드 기반 사전 필터링 (토큰 없이)
+                        if _simple_keyword_check(ai_response.question, category):
+                            validation_result = await ai_service.validate_quiz_with_gemini(
+                                question=ai_response.question,
+                                options=options,
+                                explanation=ai_response.explanation,
+                                category=category,
+                            )
+                            
+                            if not validation_result.get("is_valid", False) or validation_result.get("validation_score", 0.0) < VALIDATION_SCORE_THRESHOLD:
+                                logger.warning(
+                                    f"자동 검증 실패: sub_topic_id={request.sub_topic_id}, "
+                                    f"score={validation_result.get('validation_score', 0.0)}, "
+                                    f"issues={validation_result.get('issues', [])}"
+                                )
+                    except Exception as e:
+                        # 검증 실패해도 문제 생성은 계속 진행
+                        logger.warning(f"자동 검증 중 오류 (문제 생성은 계속 진행): {e.__class__.__name__}: {str(e)}")
+                
+                # 해시 생성 (핵심 정보 + 인덱스 + 재시도 횟수로 고유성 보장)
+                source_hash = youtube_service.generate_hash(
+                    f"{sub_topic.core_content}_{request.sub_topic_id}_{i}_{retry_count}"
+                )
+                
+                # 중복 확인
+                existing_quiz = await quiz_crud.get_quiz_by_hash(session, source_hash)
+                if existing_quiz:
+                    # 이미 존재하는 문제는 캐시에 추가
+                    if existing_quiz.sub_topic_id != request.sub_topic_id:
+                        # 다른 세부항목의 문제인 경우 sub_topic_id 업데이트
+                        existing_quiz.sub_topic_id = request.sub_topic_id
+                        await session.commit()
+                        await session.refresh(existing_quiz)
+                    new_quizzes.append(existing_quiz)
+                    quiz_created = True
+                    continue
+                
+                # 새 문제 생성
+                new_quiz = await quiz_crud.create_quiz(
+                    session,
+                    subject_id=subject_id,
+                    ai_response=ai_response,
+                    source_hash=source_hash,
+                    source_url=None,
+                    source_text=sub_topic.core_content,
+                    sub_topic_id=request.sub_topic_id,
+                )
+                new_quizzes.append(new_quiz)
+                logger.info(
+                    f"새 문제 생성: quiz_id={new_quiz.id}, "
+                    f"카테고리: {sub_topic.main_topic.subject.name} > {sub_topic.main_topic.name} > {sub_topic.name}, "
+                    f"문제: {ai_response.question[:50]}... "
+                    f"(재시도 횟수: {retry_count})"
+                )
             
-            # 해시 생성 (핵심 정보 + 인덱스로 고유성 보장)
-            source_hash = youtube_service.generate_hash(
-                f"{sub_topic.core_content}_{request.sub_topic_id}_{i}"
-            )
-            
-            # 중복 확인
-            existing_quiz = await quiz_crud.get_quiz_by_hash(session, source_hash)
-            if existing_quiz:
-                # 이미 존재하는 문제는 캐시에 추가
-                if existing_quiz.sub_topic_id != request.sub_topic_id:
-                    # 다른 세부항목의 문제인 경우 sub_topic_id 업데이트
-                    existing_quiz.sub_topic_id = request.sub_topic_id
-                    await session.commit()
-                    await session.refresh(existing_quiz)
-                new_quizzes.append(existing_quiz)
-                continue
-            
-            # 새 문제 생성
-            new_quiz = await quiz_crud.create_quiz(
-                session,
-                subject_id=subject_id,
-                ai_response=ai_response,
-                source_hash=source_hash,
-                source_url=None,
-                source_text=sub_topic.core_content,
-                sub_topic_id=request.sub_topic_id,
-            )
-            new_quizzes.append(new_quiz)
-            logger.info(
-                f"새 문제 생성: quiz_id={new_quiz.id}, "
-                f"카테고리: {sub_topic.main_topic.subject.name} > {sub_topic.main_topic.name} > {sub_topic.name}, "
-                f"문제: {ai_response.question[:50]}..."
-            )
+            # 문제 생산이 중단된 경우 루프 종료
+            if production_stopped:
+                logger.info(
+                    f"문제 생산 중단으로 루프 종료: sub_topic_id={request.sub_topic_id}, "
+                    f"생성된 문제: {len(new_quizzes)}/{needed_count}"
+                )
+                break
             
         except GeminiServiceUnavailableError as e:
             logger.error(
@@ -373,13 +444,20 @@ async def generate_study_quizzes(
     for quiz in all_quizzes[:request.quiz_count]:
         quiz_response = quiz_schema.QuizResponse.model_validate(quiz)
         
-        # 70% 확률로 변형, 30% 확률로 원본 그대로
-        if random.random() < 0.7:
+        # 유사 문제로 판단된 경우 100% 확률로 변형, 그 외는 70% 확률로 변형
+        should_vary = quiz.id in similar_quiz_ids_to_vary or random.random() < 0.7
+        if should_vary:
             quiz_response = quiz_variation.vary_quiz(quiz_response)
-            logger.debug(
-                f"캐시 문제 변형 적용: quiz_id={quiz.id}, "
-                f"sub_topic_id={request.sub_topic_id}"
-            )
+            if quiz.id in similar_quiz_ids_to_vary:
+                logger.info(
+                    f"유사 문제 변형 적용: quiz_id={quiz.id}, "
+                    f"sub_topic_id={request.sub_topic_id}"
+                )
+            else:
+                logger.debug(
+                    f"캐시 문제 변형 적용: quiz_id={quiz.id}, "
+                    f"sub_topic_id={request.sub_topic_id}"
+                )
         
         # validation_status 포함
         validation_statuses = await validation_crud.get_latest_validation_statuses(session, [quiz.id])
@@ -533,7 +611,7 @@ async def get_next_study_quiz(
                         category=category,
                     )
                     
-                    if not validation_result.get("is_valid", False) or validation_result.get("validation_score", 0.0) < 0.7:
+                    if not validation_result.get("is_valid", False) or validation_result.get("validation_score", 0.0) < VALIDATION_SCORE_THRESHOLD:
                         logger.warning(
                             f"자동 검증 실패: quiz_id={new_quiz.id if 'new_quiz' in locals() else '생성 전'}, "
                             f"score={validation_result.get('validation_score', 0.0)}, "
@@ -632,8 +710,32 @@ async def validate_quiz(
         
         # 검증 결과 저장
         is_valid = validation_result.get("is_valid", False)
-        validation_status = "valid" if is_valid else "invalid"
         validation_score = validation_result.get("validation_score", 0.0)
+        
+        # 점수와 is_valid의 일관성 검증
+        if is_valid and validation_score < VALIDATION_SCORE_THRESHOLD:
+            logger.warning(
+                f"검증 결과 일관성 문제 감지: quiz_id={quiz_id}, "
+                f"is_valid={is_valid}, validation_score={validation_score}. "
+                f"is_valid=true인데 점수가 {VALIDATION_SCORE_THRESHOLD} 미만입니다. "
+                f"점수에 맞춰 is_valid를 false로 조정합니다."
+            )
+            # 일관성을 위해 is_valid를 false로 조정
+            is_valid = False
+            validation_result["is_valid"] = False
+        
+        if not is_valid and validation_score >= VALIDATION_SCORE_THRESHOLD:
+            logger.warning(
+                f"검증 결과 일관성 문제 감지: quiz_id={quiz_id}, "
+                f"is_valid={is_valid}, validation_score={validation_score}. "
+                f"is_valid=false인데 점수가 {VALIDATION_SCORE_THRESHOLD} 이상입니다. "
+                f"점수에 맞춰 is_valid를 true로 조정합니다."
+            )
+            # 일관성을 위해 is_valid를 true로 조정
+            is_valid = True
+            validation_result["is_valid"] = True
+        
+        validation_status = "valid" if is_valid else "invalid"
         validation_score_int = int(validation_score * 100) if validation_score else None
         
         await validation_crud.create_quiz_validation(
@@ -731,30 +833,71 @@ async def request_quiz_correction(
 async def get_quiz_dashboard(
     session: AsyncSession,
 ) -> quiz_schema.QuizDashboardResponse:
-    """관리자 대시보드: 문제 목록과 카테고리 매칭 상태 시각화"""
+    """관리자 대시보드: 문제 목록과 카테고리 매칭 상태 시각화
+    
+    카테고리별 상태:
+    - normal: 정상 (문제 개수 충분, 문제 생산 가능)
+    - insufficient: 부족 (문제 개수 10개 미만)
+    - production_difficult: 생산 어려움 (재시도 초과로 문제 생산 중단 가능성)
+    """
     from sqlalchemy import func, select
     from sqlalchemy.orm import joinedload
     from app.models.quiz import Quiz
     from app.models.sub_topic import SubTopic
     from app.models.main_topic import MainTopic
-    from app.crud import quiz_validation as validation_crud
+    from app.crud import quiz_validation as validation_crud, sub_topic as sub_topic_crud, main_topic as main_topic_crud
     
     # 전체 문제 개수
     total_count = await session.scalar(select(func.count(Quiz.id)))
     
-    # 카테고리별 문제 개수
-    quizzes_with_category = await session.execute(
-        select(Quiz)
-        .where(Quiz.sub_topic_id.isnot(None))
-        .options(joinedload(Quiz.sub_topic).joinedload(SubTopic.main_topic).joinedload(MainTopic.subject))
-    )
-    quizzes = quizzes_with_category.scalars().all()
-    
+    # 카테고리별 문제 개수 및 상태 조회
     quizzes_by_category = {}
-    for quiz in quizzes:
-        if quiz.sub_topic:
-            category = f"{quiz.sub_topic.main_topic.subject.name} > {quiz.sub_topic.main_topic.name} > {quiz.sub_topic.name}"
-            quizzes_by_category[category] = quizzes_by_category.get(category, 0) + 1
+    category_status = {}
+    
+    # 주요항목의 subject 관계를 eager load
+    from sqlalchemy.orm import joinedload
+    all_main_topics_with_subject = await session.execute(
+        select(MainTopic)
+        .options(joinedload(MainTopic.subject))
+        .where(MainTopic.subject_id == 1)  # ADsP 전용
+        .order_by(MainTopic.id)
+    )
+    main_topics_list = all_main_topics_with_subject.unique().scalars().all()
+    
+    for main_topic in main_topics_list:
+        subject_name = main_topic.subject.name if main_topic.subject else "ADsP"
+        
+        sub_topics = await sub_topic_crud.get_sub_topics_by_main_topic_id(session, main_topic.id)
+        for sub_topic in sub_topics:
+            category = f"{subject_name} > {main_topic.name} > {sub_topic.name}"
+            
+            # 문제 개수 조회
+            quiz_count = await quiz_crud.get_quiz_count_by_sub_topic_id(session, sub_topic.id)
+            quizzes_by_category[category] = quiz_count
+            
+            # 카테고리 상태 판단
+            status = "normal"
+            if quiz_count < 10:
+                status = "insufficient"  # 부족 (10개 미만)
+            else:
+                # 가장 최근 문제와 핵심 정보 업데이트 시점 비교
+                latest_quiz = await quiz_crud.get_latest_quiz_by_sub_topic_id(session, sub_topic.id)
+                if latest_quiz and sub_topic.updated_at and latest_quiz.created_at:
+                    # 핵심 정보가 변경되지 않았고 문제가 충분하면 생산 어려움 가능성
+                    # (재시도 초과로 생산 중단된 경우)
+                    if sub_topic.updated_at <= latest_quiz.created_at:
+                        # 핵심 정보가 오래 안 바뀌고 문제도 오래 안 생성되면 생산 어려움 가능성
+                        # 하지만 정확한 감지는 어려우므로 일단 normal로 처리
+                        # (향후 로그 분석 또는 플래그 추가로 개선 가능)
+                        status = "normal"
+                    else:
+                        # 핵심 정보가 최근에 변경되었으면 정상
+                        status = "normal"
+                else:
+                    # 문제가 없거나 정보가 부족하면 정상으로 간주
+                    status = "normal"
+            
+            category_status[category] = status
     
     # 최근 생성된 문제 (최대 10개)
     recent_quizzes_result = await session.execute(
@@ -821,6 +964,7 @@ async def get_quiz_dashboard(
     return quiz_schema.QuizDashboardResponse(
         total_quizzes=total_count or 0,
         quizzes_by_category=quizzes_by_category,
+        category_status=category_status,
         validation_status=validation_status_counts,
         recent_quizzes=recent_quizzes,
         quizzes_needing_validation=quizzes_needing_validation,
@@ -828,7 +972,11 @@ async def get_quiz_dashboard(
 
 
 def _calculate_question_similarity(q1: str, q2: str) -> float:
-    """문제 텍스트 유사도 계산 (토큰 없이, Jaccard 유사도 사용)
+    """문제 텍스트 유사도 계산 (토큰 없이, 정교한 방식)
+    
+    한국어 특성을 고려한 다중 유사도 지표 조합:
+    - 정규화된 단어 Jaccard 유사도 (조사/어미 제거, 유사 표현 정규화)
+    - 문자 n-gram 유사도 (2-gram, 3-gram)
     
     Args:
         q1: 첫 번째 문제 텍스트
@@ -837,18 +985,7 @@ def _calculate_question_similarity(q1: str, q2: str) -> float:
     Returns:
         0.0 ~ 1.0 사이의 유사도 (1.0이 완전 동일)
     """
-    # 공백 제거 및 소문자 변환 (한글은 변환 불필요)
-    words1 = set(q1.replace("?", "").replace(".", "").split())
-    words2 = set(q2.replace("?", "").replace(".", "").split())
-    
-    if not words1 or not words2:
-        return 0.0
-    
-    # Jaccard 유사도: 교집합 / 합집합
-    intersection = words1 & words2
-    union = words1 | words2
-    
-    return len(intersection) / len(union) if union else 0.0
+    return calculate_question_similarity(q1, q2)
 
 
 def _simple_keyword_check(question: str, category: str) -> bool:
