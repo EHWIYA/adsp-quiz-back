@@ -5,5 +5,6 @@ from app.models.quiz import Quiz
 from app.models.quiz_validation import QuizValidation
 from app.models.sub_topic import SubTopic
 from app.models.subject import Subject
+from app.models.wrong_answer import WrongAnswer
 
-__all__ = ["Base", "Subject", "MainTopic", "SubTopic", "Quiz", "QuizValidation", "ExamRecord", "get_db"]
+__all__ = ["Base", "Subject", "MainTopic", "SubTopic", "Quiz", "QuizValidation", "ExamRecord", "WrongAnswer", "get_db"]

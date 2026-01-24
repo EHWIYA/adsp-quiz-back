@@ -22,7 +22,7 @@
 - **마이그레이션**: Alembic 사용, 배포 시 자동 실행, 실패 시 배포 중단 → [상세](./rules/database/migration.md)
 - **Python**: 비동기 필수, **문법 검증(`py_compile`) 필수**, SOLID 준수 → [상세](./rules/development/python.md)
 - **SQLAlchemy**: 비동기 컨텍스트에서 lazy loading 금지, 관계 접근 시 eager loading 필수 → [상세](./rules/database/sqlalchemy.md)
-- **프론트엔드**: 배포 상태 확인 최우선, 배포 후 검증, 응답 문서 작성 → [상세](./rules/integration/frontend.md)
+- **프론트엔드**: 배포 상태 확인 최우선, 배포 후 검증, 새 API 추가 시 문서 작성 필수 → [상세](./rules/integration/frontend.md)
 - **배포**: 환경변수/마이그레이션/의존성/테스트/SSH 키 확인 필수 → [상세](./rules/deployment/ci-cd.md)
 - **의존성**: `pyproject.toml` 사용, 외부 라이브러리 API 변경 대응 → [상세](./rules/development/dependencies.md)
 - **Git 커밋**: 명시적 요청 없이 커밋/푸시 금지, 단계별 동작(`커밋 준비해줘`=제안, `커밋 및 푸시 진행해줘`=실행), **커밋 메시지 제안 전 반드시 규칙 파일 전체 읽기 및 체크리스트 수행 필수**, 날짜/인코딩 검증, 형식 `yyMMdd > back-end > fast-api > 한 줄 설명` 절대 준수 → [상세](./rules/development/git-commit.md)
