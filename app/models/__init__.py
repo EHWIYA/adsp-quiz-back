@@ -12,10 +12,12 @@ from app.models.quiz import Quiz
 from app.models.quiz_validation import QuizValidation
 from app.models.sub_topic import SubTopic
 from app.models.subject import Subject
+from app.models.user import User
 from app.models.wrong_answer import WrongAnswer
 
 __all__ = [
     "Base",
+    "User",
     "Subject",
     "MainTopic",
     "SubTopic",

@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import text
 
-from app.api.v1 import core_content, exam, main_topics, quiz, subjects, sub_topics, wrong_answers
+from app.api.v1 import auth, core_content, exam, main_topics, quiz, subjects, sub_topics, wrong_answers
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.exceptions import BaseAppError
@@ -30,6 +30,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router, prefix="/api/v1")
 app.include_router(quiz.router, prefix="/api/v1")
 app.include_router(exam.router, prefix="/api/v1")
 app.include_router(subjects.router, prefix="/api/v1")

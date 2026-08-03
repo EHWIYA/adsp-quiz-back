@@ -11,9 +11,12 @@ from app.models.wrong_answer import WrongAnswer
 async def get_wrong_answer_by_quiz_id(
     session: AsyncSession,
     quiz_id: int,
+    user_id: int | None = None,
 ) -> WrongAnswer | None:
-    """quiz_id로 오답노트 조회"""
+    """quiz_id로 오답노트 조회 (user_id 있으면 스코프)."""
     stmt = select(WrongAnswer).where(WrongAnswer.quiz_id == quiz_id)
+    if user_id is not None:
+        stmt = stmt.where(WrongAnswer.user_id == user_id)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
@@ -29,6 +32,7 @@ async def create_wrong_answer(
     subject_id: int | None = None,
     sub_topic_id: int | None = None,
     created_at_original: datetime | None = None,
+    user_id: int | None = None,
 ) -> WrongAnswer:
     """오답노트 생성"""
     options_json = json.dumps(
@@ -38,6 +42,7 @@ async def create_wrong_answer(
     
     wrong_answer = WrongAnswer(
         quiz_id=quiz_id,
+        user_id=user_id,
         question=question,
         options=options_json,
         selected_answer=selected_answer,
@@ -74,9 +79,12 @@ async def get_wrong_answers(
     limit: int = 20,
     sort: str = "saved_at",
     order: str = "desc",
+    user_id: int | None = None,
 ) -> tuple[Sequence[WrongAnswer], int]:
     """오답노트 목록 조회 (필터링, 페이지네이션, 정렬)"""
     stmt = select(WrongAnswer)
+    if user_id is not None:
+        stmt = stmt.where(WrongAnswer.user_id == user_id)
     
     if subject_id is not None:
         stmt = stmt.where(WrongAnswer.subject_id == subject_id)

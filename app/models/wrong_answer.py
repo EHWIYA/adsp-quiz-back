@@ -9,7 +9,8 @@ class WrongAnswer(Base, TimestampMixin):
     __tablename__ = "wrong_answers"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    quiz_id: Mapped[int] = mapped_column(nullable=False, unique=True, index=True)
+    quiz_id: Mapped[int] = mapped_column(nullable=False, index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     question: Mapped[str] = mapped_column(Text, nullable=False)
     options: Mapped[str] = mapped_column(Text, nullable=False)
     selected_answer: Mapped[int] = mapped_column(nullable=False)

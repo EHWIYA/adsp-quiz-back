@@ -3,8 +3,10 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_optional_user
 from app.crud import wrong_answer as wrong_answer_crud
 from app.models.base import get_db
+from app.models.user import User
 from app.schemas import wrong_answer as wrong_answer_schema
 
 router = APIRouter(prefix="/wrong-answers", tags=["wrong-answers"])
@@ -14,9 +16,13 @@ router = APIRouter(prefix="/wrong-answers", tags=["wrong-answers"])
 async def create_wrong_answer(
     request: wrong_answer_schema.WrongAnswerCreateRequest,
     db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
 ):
     """오답 저장 API (동일 quiz_id가 있으면 기존 데이터 반환)"""
-    existing = await wrong_answer_crud.get_wrong_answer_by_quiz_id(db, request.quiz_id)
+    user_id = user.id if user else None
+    existing = await wrong_answer_crud.get_wrong_answer_by_quiz_id(
+        db, request.quiz_id, user_id=user_id
+    )
     
     if existing:
         return wrong_answer_schema.WrongAnswerResponse.model_validate(existing)
@@ -39,6 +45,7 @@ async def create_wrong_answer(
         subject_id=request.subject_id,
         sub_topic_id=request.sub_topic_id,
         created_at_original=created_at_original,
+        user_id=user_id,
     )
     
     return wrong_answer_schema.WrongAnswerResponse.model_validate(wrong_answer)
@@ -53,6 +60,7 @@ async def get_wrong_answers(
     sort: str = Query("saved_at", description="정렬 기준 (created_at 또는 saved_at)"),
     order: str = Query("desc", description="정렬 순서 (asc 또는 desc)"),
     db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
 ):
     """오답노트 조회 API (필터링, 페이지네이션, 정렬)"""
     if sort not in ("created_at", "saved_at"):
@@ -75,6 +83,7 @@ async def get_wrong_answers(
         limit=limit,
         sort=sort,
         order=order,
+        user_id=user.id if user else None,
     )
     
     total_pages = (total + limit - 1) // limit if limit > 0 else 0
