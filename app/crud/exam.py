@@ -40,8 +40,14 @@ async def get_exam_records_by_session(
     session: AsyncSession,
     exam_session_id: str,
 ) -> Sequence[ExamRecord]:
-    """시험 세션 ID로 기록 조회"""
-    stmt = select(ExamRecord).where(ExamRecord.exam_session_id == exam_session_id)
+    """시험 세션 ID로 기록 조회 (quiz eager load)"""
+    from sqlalchemy.orm import selectinload
+
+    stmt = (
+        select(ExamRecord)
+        .where(ExamRecord.exam_session_id == exam_session_id)
+        .options(selectinload(ExamRecord.quiz))
+    )
     result = await session.execute(stmt)
     return result.scalars().all()
 
@@ -52,9 +58,15 @@ async def get_exam_record_by_session_and_quiz(
     quiz_id: int,
 ) -> ExamRecord | None:
     """시험 세션 ID와 문제 ID로 기록 조회"""
-    stmt = select(ExamRecord).where(
-        ExamRecord.exam_session_id == exam_session_id,
-        ExamRecord.quiz_id == quiz_id,
+    from sqlalchemy.orm import selectinload
+
+    stmt = (
+        select(ExamRecord)
+        .where(
+            ExamRecord.exam_session_id == exam_session_id,
+            ExamRecord.quiz_id == quiz_id,
+        )
+        .options(selectinload(ExamRecord.quiz))
     )
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
@@ -67,8 +79,17 @@ async def update_exam_record_answer(
     is_correct: bool,
 ) -> ExamRecord:
     """시험 기록 답안 업데이트"""
+    from sqlalchemy.orm import selectinload
+
     record.user_answer = user_answer
     record.is_correct = is_correct
     await session.commit()
-    await session.refresh(record)
-    return record
+    await session.refresh(record, attribute_names=["id", "quiz_id", "user_answer", "is_correct", "created_at"])
+    # quiz 관계 재로드
+    stmt = (
+        select(ExamRecord)
+        .where(ExamRecord.id == record.id)
+        .options(selectinload(ExamRecord.quiz))
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one()

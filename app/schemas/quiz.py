@@ -202,6 +202,9 @@ class QuizListResponse(BaseModel):
     """문제 목록 응답 스키마"""
     quizzes: list[QuizResponse]
     total: int
+    exam_session_id: str | None = Field(
+        None, description="시험 세션 ID (exam/start 응답에만 설정)"
+    )
 
 
 class StudyModeQuizListResponse(BaseModel):

@@ -90,7 +90,11 @@ async def start_exam(
             quiz_responses.append(quiz_schema.QuizResponse.model_validate(quiz_dict))
 
         logger.info(f"시험 시작 성공: exam_session_id={exam_session_id}, quiz_count={len(quizzes)}")
-        return quiz_schema.QuizListResponse(quizzes=quiz_responses, total=len(quiz_responses))
+        return quiz_schema.QuizListResponse(
+            quizzes=quiz_responses,
+            total=len(quiz_responses),
+            exam_session_id=exam_session_id,
+        )
     
     except BaseAppError:
         raise
